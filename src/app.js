@@ -12,7 +12,7 @@ import {
 import { MOODS, generateLyrics, generateProgression } from './generator.js';
 import {
   MELODY_ROWS, STEP_OPTIONS, rowToMidi, chordToneRows, noteAt, addNote, removeNote,
-  rescale, toPlayable, generateSectionMelody,
+  rescale, toPlayable, generateSectionMelody, shiftMelodies,
 } from './melody.js';
 import { Player, PATTERNS } from './audio.js';
 import {
@@ -403,6 +403,10 @@ function renderSection(section, sectionIndex) {
       if (!section.showMelody) b.classList.add('off');
       return b;
     })(),
+    mk('♪⇈', 'mel-oct-up', 'メロディを1オクターブ上げる（小節を選んでいればその小節だけ）'),
+    mk('♪▲', 'mel-up', 'メロディを2度上げる（スケール上で1段。小節を選んでいればその小節だけ）'),
+    mk('♪▼', 'mel-down', 'メロディを2度下げる（スケール上で1段。小節を選んでいればその小節だけ）'),
+    mk('♪⇊', 'mel-oct-down', 'メロディを1オクターブ下げる（小節を選んでいればその小節だけ）'),
     mk('🧹', 'clear-melody', 'このセクションのメロディを消す'),
     mk('▶', 'play-section', 'このセクションだけ再生'),
     mk('🎹', 'toggle-palette', 'コードパレットを開閉'),
@@ -508,6 +512,37 @@ function genLyrics(section) {
   persist();
   render();
   toast('歌詞のたたきを入れました（AIキー不要のオフライン生成）');
+}
+
+/**
+ * メロディの高さをまとめて上下させる。
+ * 小節を選んでいればその小節だけ、選んでいなければセクション全体。
+ */
+function shiftSectionMelody(section, delta) {
+  const targets = selectedIndexes(section);
+  const indexes = targets.length ? targets : section.bars.map((_, i) => i);
+  const groups = indexes.map((i) => section.bars[i].melody);
+  const res = shiftMelodies(groups, delta);
+
+  if (!res.moved) {
+    const hasNotes = groups.some((g) => g.length);
+    toast(
+      hasNotes
+        // 曲全体を上げ下げしたいなら、こちらではなくキーの移調が正しい操作になる
+        ? 'これ以上動かすと音域からはみ出します（曲ごと上げたいときは上部の移調 ▲▼ を使ってください）'
+        : '動かすメロディがありません',
+      true
+    );
+    return;
+  }
+  indexes.forEach((barIndex, i) => { section.bars[barIndex].melody = res.groups[i]; });
+  persist();
+  render();
+
+  const what = Math.abs(delta) === 7 ? '1オクターブ' : '2度';
+  const dir = delta > 0 ? '上げました' : '下げました';
+  const scope = targets.length ? `選択した${targets.length}小節の` : '';
+  toast(`${scope}メロディを${what}${dir}`);
 }
 
 function genMelody(section) {
@@ -643,6 +678,10 @@ $('#sections').addEventListener('click', (ev) => {
       section.showMelody = !section.showMelody;
       persist(); render();
       break;
+    case 'mel-up': shiftSectionMelody(section, 1); break;
+    case 'mel-down': shiftSectionMelody(section, -1); break;
+    case 'mel-oct-up': shiftSectionMelody(section, 7); break;
+    case 'mel-oct-down': shiftSectionMelody(section, -7); break;
     case 'clear-melody':
       section.bars.forEach((b) => { b.melody = []; });
       persist(); render();

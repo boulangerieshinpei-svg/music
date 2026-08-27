@@ -68,6 +68,30 @@ export function rescale(melody, fromSteps, toSteps) {
     .map((n) => ({ ...n, d: Math.min(n.d, toSteps - n.s) }));
 }
 
+/**
+ * メロディの高さをまとめて動かす。
+ *
+ * delta はスケール上の段数。+1 = 2度上、+7 = 1オクターブ上。
+ * 段数で動かすのでキーから外れない（キーによって全音になる所と半音になる所がある）。
+ *
+ * 1音でも範囲外になる場合は動かさない。はみ出た音だけ端に寄せると
+ * メロディの形が崩れてしまうため、全部動かすか何もしないかにしている。
+ *
+ * @param {Array} groups 対象の小節のメロディ配列の配列（小節をまたいで一括で動かす）
+ * @returns {{groups:Array, moved:boolean}}
+ */
+export function shiftMelodies(groups, delta, rows = MELODY_ROWS) {
+  const all = groups.flat();
+  if (!all.length) return { groups, moved: false };
+  const min = Math.min(...all.map((n) => n.n));
+  const max = Math.max(...all.map((n) => n.n));
+  if (min + delta < 0 || max + delta > rows - 1) return { groups, moved: false };
+  return {
+    groups: groups.map((notes) => notes.map((n) => ({ ...n, n: n.n + delta }))),
+    moved: true,
+  };
+}
+
 /** 再生用に、小節内の相対位置と MIDI ノート番号へ変換する */
 export function toPlayable(project, melody, steps) {
   return melody.map((n) => ({
