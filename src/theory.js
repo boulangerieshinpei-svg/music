@@ -212,6 +212,24 @@ export function scaleNotes(key, mode, octave = 4) {
   return scale.map((iv) => 12 * (octave + 1) + rootPc + iv);
 }
 
+/**
+ * スケール上の段数(0=主音)を MIDI ノート番号に変換する。
+ * メロディはこの段数で保存するので、移調してもキーに追従する。
+ */
+export function scaleIndexToMidi(key, mode, index, octave = 4) {
+  const rootPc = noteToPc(key);
+  const scale = mode === 'minor' ? MINOR_SCALE : MAJOR_SCALE;
+  const oct = Math.floor(index / 7);
+  const deg = ((index % 7) + 7) % 7;
+  return 12 * (octave + 1) + rootPc + 12 * oct + scale[deg];
+}
+
+/** スケール段数の音名（表示用）。例: C キーの 0 -> 'C', 7 -> 'C' */
+export function scaleIndexName(key, mode, index) {
+  const midi = scaleIndexToMidi(key, mode, index);
+  return pcToNote(midi % 12, keyPrefersFlats(key, mode));
+}
+
 /** MIDIノート番号 -> 周波数 */
 export function midiToFreq(midi) {
   return 440 * Math.pow(2, (midi - 69) / 12);

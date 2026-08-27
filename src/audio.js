@@ -20,6 +20,8 @@ export class Player {
     this.pattern = 'pad';
     this.click = true;
     this.volume = 0.7;
+    this.playChords = true;
+    this.playMelody = true;
     this.onBar = null;      // (globalBarIndex, sectionIndex, barIndex) => void
     this.onStop = null;
     this._queue = [];       // 再生するバーの配列
@@ -47,7 +49,9 @@ export class Player {
   }
 
   /**
-   * @param {Array<{chord:string, sectionIndex:number, barIndex:number}>} bars
+   * @param {Array<{chord:string, melody?:Array<{start:number,dur:number,midi:number}>,
+   *                sectionIndex:number, barIndex:number}>} bars
+   *        melody の start / dur は小節を1とした相対値。
    * @param {{bpm:number, beatsPerBar:number, loop?:boolean}} opts
    */
   play(bars, { bpm, beatsPerBar, loop = false }) {
@@ -102,6 +106,12 @@ export class Player {
         this._click(t0 + b * secPerBeat, b === 0);
       }
     }
+    if (this.playMelody && bar.melody?.length) {
+      for (const note of bar.melody) {
+        this._lead(midiToFreq(note.midi), t0 + note.start * barDur, note.dur * barDur);
+      }
+    }
+    if (!this.playChords) return;
     const c = parseChord(bar.chord);
     if (!c) return;
     const ivs = intervalsFor(c.quality);
@@ -128,6 +138,45 @@ export class Player {
         );
       }
     }
+  }
+
+  /** メロディ用の音色。コードより前に出るように少し強く、明るめに鳴らす */
+  _lead(freq, at, dur, gain = 0.3) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    const filt = ctx.createBiquadFilter();
+    filt.type = 'lowpass';
+    filt.frequency.value = 3800;
+    osc.type = 'square';
+    osc.frequency.value = freq;
+
+    // 伸ばす音には軽くビブラートをかけて、歌っぽく聞こえるようにする
+    if (dur > 0.35) {
+      const lfo = ctx.createOscillator();
+      const lfoGain = ctx.createGain();
+      lfo.frequency.value = 5.5;
+      lfoGain.gain.value = freq * 0.006;
+      lfo.connect(lfoGain).connect(osc.frequency);
+      lfo.start(at + 0.15);
+      lfo.stop(at + dur);
+    }
+
+    const a = 0.015;
+    const r = Math.min(0.12, dur * 0.4);
+    g.gain.setValueAtTime(0, at);
+    g.gain.linearRampToValueAtTime(gain, at + a);
+    g.gain.setValueAtTime(gain, at + Math.max(a, dur - r));
+    g.gain.linearRampToValueAtTime(0.0001, at + dur);
+    osc.connect(filt).connect(g).connect(this.master);
+    osc.start(at);
+    osc.stop(at + dur + 0.02);
+  }
+
+  /** グリッドをタップしたときの試聴。再生中でなくても鳴らせる */
+  previewNote(freq, dur = 0.28) {
+    this._ensureCtx();
+    this._lead(freq, this.ctx.currentTime + 0.01, dur, 0.32);
   }
 
   _note(freq, at, dur, gain, type = 'sine') {

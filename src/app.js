@@ -2,6 +2,7 @@
 
 import {
   KEYS, MODES, diatonicChords, spiceChords, PROGRESSIONS, progressionInKey, parseChord,
+  midiToFreq, scaleIndexName,
 } from './theory.js';
 import { countMora, hasKanji } from './mora.js';
 import {
@@ -9,8 +10,14 @@ import {
   saveLocal, loadLocal, saveSettings, loadSettings, totalBars, estimateSeconds, lyricsToText,
 } from './state.js';
 import { MOODS, generateLyrics, generateProgression } from './generator.js';
+import {
+  MELODY_ROWS, STEP_OPTIONS, rowToMidi, chordToneRows, noteAt, addNote, removeNote,
+  rescale, toPlayable, generateSectionMelody,
+} from './melody.js';
 import { Player, PATTERNS } from './audio.js';
-import { MODELS, EFFORTS, writeLyrics, suggestChords, suggestIdeas, testKey, AIError } from './ai.js';
+import {
+  MODELS, EFFORTS, writeLyrics, suggestChords, suggestMelody, suggestIdeas, testKey, AIError,
+} from './ai.js';
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, className, text) => {
@@ -22,7 +29,10 @@ const el = (tag, className, text) => {
 
 let project = loadLocal() || defaultProject();
 let settings = Object.assign(
-  { apiKey: '', model: MODELS[0].id, effort: 'medium', pattern: 'pad', click: true, volume: 0.7 },
+  {
+    apiKey: '', model: MODELS[0].id, effort: 'medium',
+    pattern: 'pad', click: true, volume: 0.7, playChords: true, playMelody: true,
+  },
   loadSettings()
 );
 const selection = new Set();     // "sectionId#barIndex"
@@ -209,7 +219,75 @@ function renderBar(section, bar, index) {
   fillMora(mora, section, bar);
 
   node.append(head, chord, lyric, mora);
+
+  if (section.showMelody) {
+    const wrap = el('div', 'mel-wrap');
+    const count = el('span', 'note-count');
+    wrap.append(renderMelodyGrid(section, bar), count);
+    fillNoteCount(count, section, bar);
+    node.append(wrap);
+  }
   return node;
+}
+
+/**
+ * メロディグリッドを描く。
+ * 行 = キーのスケール段数（上ほど高い）、列 = 小節の分割。
+ * そのコードの構成音の行に色を敷いてあるので、光っている行を叩けば必ずハマる。
+ */
+function renderMelodyGrid(section, bar) {
+  const grid = el('div', 'mel-grid');
+  grid.style.setProperty('--steps', section.steps);
+  grid.style.setProperty('--rows', MELODY_ROWS);
+  grid.dataset.melGrid = '1';
+
+  const stepsPerBeat = Math.max(1, Math.round(section.steps / project.beatsPerBar));
+  const { tones, root } = chordToneRows(project, bar.chord);
+
+  for (let row = MELODY_ROWS - 1; row >= 0; row--) {
+    for (let step = 0; step < section.steps; step++) {
+      const cell = el('div', 'mel-cell');
+      cell.dataset.row = String(row);
+      cell.dataset.step = String(step);
+      if (tones.has(row)) cell.classList.add('tone');
+      if (row === root) cell.classList.add('root');
+      if (step % stepsPerBeat === 0) cell.classList.add('beat');
+      cell.title = scaleIndexName(project.key, project.mode, row);
+      grid.append(cell);
+    }
+  }
+  paintNotes(grid, section, bar);
+  return grid;
+}
+
+/** 音符の有無だけをセルのクラスに反映する（作り直さないので軽い） */
+function paintNotes(grid, section, bar) {
+  grid.querySelectorAll('.mel-cell.on, .mel-cell.head')
+    .forEach((c) => c.classList.remove('on', 'head'));
+  for (const note of bar.melody) {
+    for (let i = 0; i < note.d; i++) {
+      const step = note.s + i;
+      if (step >= section.steps) break;
+      const cell = grid.querySelector(`.mel-cell[data-row="${note.n}"][data-step="${step}"]`);
+      if (!cell) continue;
+      cell.classList.add('on');
+      if (i === 0) cell.classList.add('head');
+    }
+  }
+  const badge = grid.parentElement?.querySelector('.note-count');
+  if (badge) fillNoteCount(badge, section, bar);
+}
+
+/** 音符の数を出す。歌詞のモーラ数と揃っていれば緑になる */
+function fillNoteCount(node, section, bar) {
+  const notes = bar.melody.length;
+  const mora = countMora(bar.yomi || bar.lyric);
+  node.className = 'note-count';
+  if (notes && mora) node.classList.add(notes === mora ? 'fit' : Math.abs(notes - mora) <= 1 ? 'near' : 'off');
+  node.textContent = notes ? `♪${notes}音` : '♪—';
+  node.title = mora
+    ? `メロディ ${notes}音 / 歌詞 ${mora}モーラ（揃っていると1音1文字で乗ります）`
+    : 'タップして音を置く。右へドラッグで音が伸びます';
 }
 
 function renderPalette(section) {
@@ -299,12 +377,33 @@ function renderSection(section, sectionIndex) {
   group.append(
     mk('🎲 コード', 'gen-chords', 'オフラインでコード進行のたたきを作る'),
     mk('🎲 歌詞', 'gen-lyrics', 'オフラインで歌詞のたたきを作る'),
+    mk('🎲 メロディ', 'gen-melody', 'コードと歌詞のモーラ数に合わせてメロディのたたきを作る'),
     mk('✨ AIコード', 'ai-chords', '選択した小節（未選択ならセクション全体）のコードをAIが提案', true),
     mk('✨ AI歌詞', 'ai-lyrics', '選択した小節（未選択ならセクション全体）の歌詞をAIが書き換え', true),
+    mk('✨ AIメロ', 'ai-melody', '歌詞とコードに合うメロディをAIが提案', true),
   );
+
+  const stepsLabel = el('label', 'ctl');
+  const stepsSel = el('select');
+  for (const o of STEP_OPTIONS) {
+    const opt = el('option', null, o.label);
+    opt.value = o.id;
+    stepsSel.append(opt);
+  }
+  stepsSel.value = String(section.steps);
+  stepsSel.dataset.act = 'steps';
+  stepsSel.title = 'メロディグリッドの細かさ';
+  stepsLabel.append(stepsSel);
 
   const tools = el('div', 'head-group');
   tools.append(
+    (() => {
+      const b = mk('🎵', 'toggle-melody',
+        section.showMelody ? 'メロディグリッドを隠す' : 'メロディグリッドを表示');
+      if (!section.showMelody) b.classList.add('off');
+      return b;
+    })(),
+    mk('🧹', 'clear-melody', 'このセクションのメロディを消す'),
     mk('▶', 'play-section', 'このセクションだけ再生'),
     mk('🎹', 'toggle-palette', 'コードパレットを開閉'),
     mk('↑', 'move-up', '上へ'),
@@ -313,7 +412,7 @@ function renderSection(section, sectionIndex) {
     mk('✕', 'delete-section', 'このセクションを削除'),
   );
 
-  head.append(tag, name, barsLabel, moraLabel, el('span', 'spacer'), group, tools);
+  head.append(tag, name, barsLabel, moraLabel, stepsLabel, el('span', 'spacer'), group, tools);
 
   const bars = el('div', 'bars');
   section.bars.forEach((bar, i) => bars.append(renderBar(section, bar, i)));
@@ -343,7 +442,12 @@ function collectBars(sectionFilter = null) {
   const out = [];
   project.sections.forEach((sec, si) => {
     if (sectionFilter && sec.id !== sectionFilter) return;
-    sec.bars.forEach((bar, bi) => out.push({ chord: bar.chord, sectionIndex: si, barIndex: bi }));
+    sec.bars.forEach((bar, bi) => out.push({
+      chord: bar.chord,
+      melody: toPlayable(project, bar.melody, sec.steps),
+      sectionIndex: si,
+      barIndex: bi,
+    }));
   });
   return out;
 }
@@ -364,6 +468,8 @@ function startPlayback(sectionId = null) {
   if (!bars.length) { toast('鳴らす小節がありません', true); return; }
   player.pattern = settings.pattern;
   player.click = settings.click;
+  player.playChords = settings.playChords;
+  player.playMelody = settings.playMelody;
   player.setVolume(settings.volume);
   player.onBar = (_, si, bi) => highlight(si, bi);
   player.onStop = () => {
@@ -402,6 +508,41 @@ function genLyrics(section) {
   persist();
   render();
   toast('歌詞のたたきを入れました（AIキー不要のオフライン生成）');
+}
+
+function genMelody(section) {
+  const moraCounts = section.bars.map((b) => countMora(b.yomi || b.lyric));
+  const melodies = generateSectionMelody({ project, section, moraCounts });
+  section.bars.forEach((bar, i) => { bar.melody = melodies[i]; });
+  persist();
+  render();
+  const withLyric = moraCounts.filter(Boolean).length;
+  toast(withLyric
+    ? `メロディのたたきを作りました（歌詞のある${withLyric}小節は音数をモーラ数に合わせています）`
+    : 'メロディのたたきを作りました（歌詞を入れてから作り直すと、音数が歌詞に合います）');
+}
+
+async function aiMelody(section) {
+  await runAI('メロディ', async () => {
+    const res = await suggestMelody({
+      ...aiOpts(),
+      section,
+      rows: MELODY_ROWS,
+      instruction: $('#aiInstruction').value.trim(),
+    });
+    const byBar = new Map();
+    for (const n of res.notes) {
+      if (!byBar.has(n.bar)) byBar.set(n.bar, []);
+      byBar.get(n.bar).push({ s: n.step, d: Math.max(1, n.duration), n: n.degree });
+    }
+    section.bars.forEach((bar, i) => {
+      const notes = byBar.get(i);
+      if (notes) bar.melody = notes.sort((a, b) => a.s - b.s);
+    });
+    persist();
+    render();
+    return `${byBar.size}小節にメロディを置きました${res.comment ? ' / ' + res.comment : ''}`;
+  });
 }
 
 async function aiLyrics(section, forcedIndexes = null) {
@@ -496,6 +637,17 @@ $('#sections').addEventListener('click', (ev) => {
       break;
     case 'gen-chords': genChords(section); break;
     case 'gen-lyrics': genLyrics(section); break;
+    case 'gen-melody': genMelody(section); break;
+    case 'ai-melody': aiMelody(section); break;
+    case 'toggle-melody':
+      section.showMelody = !section.showMelody;
+      persist(); render();
+      break;
+    case 'clear-melody':
+      section.bars.forEach((b) => { b.melody = []; });
+      persist(); render();
+      toast('メロディを消しました');
+      break;
     case 'ai-chords': aiChords(section); break;
     case 'ai-lyrics': aiLyrics(section); break;
     case 'play-section': startPlayback(section.id); break;
@@ -555,10 +707,21 @@ $('#sections').addEventListener('input', (ev) => {
       persist();
       break;
     }
+    case 'steps': {
+      const next = Number(target.value);
+      // 分割を変えたら、置いてある音符の位置と長さを比例させる
+      section.bars.forEach((bar) => { bar.melody = rescale(bar.melody, section.steps, next); });
+      section.steps = next;
+      persist(); render();
+      break;
+    }
     case 'chord': {
       const bar = section.bars[Number(barNode.dataset.index)];
       bar.chord = target.value;
       target.classList.toggle('invalid', !!bar.chord && !parseChord(bar.chord));
+      // コードが変わるとグリッドで光る行（構成音）も変わる
+      const grid = barNode.querySelector('[data-mel-grid]');
+      if (grid) grid.replaceWith(renderMelodyGrid(section, bar));
       persist();
       break;
     }
@@ -567,11 +730,128 @@ $('#sections').addEventListener('input', (ev) => {
       bar.lyric = target.value;
       bar.yomi = '';  // 手で書き換えたらAI由来の読みは破棄
       refreshMora(barNode, section, bar);
+      const badge = barNode.querySelector('.note-count');
+      if (badge) fillNoteCount(badge, section, bar);
       persist();
       break;
     }
   }
 });
+
+/* --- メロディグリッドのタップ／ドラッグ --- */
+
+let drag = null;
+
+/** 座標から (行, ステップ) を割り出す。指でなぞってもセルを取りこぼさない */
+function cellFromPoint(grid, section, clientX, clientY) {
+  const r = grid.getBoundingClientRect();
+  const step = Math.floor(((clientX - r.left) / r.width) * section.steps);
+  const fromTop = Math.floor(((clientY - r.top) / r.height) * MELODY_ROWS);
+  if (step < 0 || step >= section.steps || fromTop < 0 || fromTop >= MELODY_ROWS) return null;
+  return { step, row: MELODY_ROWS - 1 - fromTop };
+}
+
+function previewRow(row) {
+  try {
+    player.previewNote(midiToFreq(rowToMidi(project, row)));
+  } catch { /* 音が出せない環境でも操作は続けられるようにする */ }
+}
+
+/** タップ位置に音を置く／消す */
+function commitAt(d, row, step) {
+  const { grid, section, bar } = d;
+  const existing = noteAt(bar.melody, row, step);
+  if (existing) {
+    d.mode = 'erase';
+    bar.melody = removeNote(bar.melody, existing);
+  } else {
+    d.mode = 'draw';
+    d.row = row;
+    d.startStep = step;
+    bar.melody = addNote(bar.melody, { s: step, d: 1, n: row }, section.steps);
+    previewRow(row);
+  }
+  paintNotes(grid, section, bar);
+}
+
+$('#sections').addEventListener('pointerdown', (ev) => {
+  const grid = ev.target.closest('[data-mel-grid]');
+  if (!grid) return;
+  const barNode = grid.closest('.bar');
+  const section = sectionById(barNode.dataset.sec);
+  const bar = section.bars[Number(barNode.dataset.index)];
+  const hit = cellFromPoint(grid, section, ev.clientX, ev.clientY);
+  if (!hit) return;
+
+  drag = {
+    grid, section, bar, mode: 'pending',
+    row: hit.row, startStep: hit.step,
+    startX: ev.clientX, startY: ev.clientY,
+    touch: ev.pointerType === 'touch',
+  };
+
+  // 指の場合はここではまだ書き込まない。
+  // 縦に動いたらページのスクロールなので、指を離した時点でタップとして確定する。
+  if (!drag.touch) {
+    ev.preventDefault();
+    commitAt(drag, hit.row, hit.step);
+    grid.setPointerCapture(ev.pointerId);
+  }
+});
+
+$('#sections').addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  const { grid, section, bar } = drag;
+
+  if (drag.mode === 'pending') {
+    const dx = ev.clientX - drag.startX;
+    const dy = ev.clientY - drag.startY;
+    if (Math.abs(dy) > 10) return;   // 縦方向はスクロールに譲る
+    if (Math.abs(dx) < 8) return;
+    commitAt(drag, drag.row, drag.startStep);
+    grid.setPointerCapture(ev.pointerId);
+  }
+
+  const hit = cellFromPoint(grid, section, ev.clientX, ev.clientY);
+  if (!hit) return;
+
+  if (drag.mode === 'erase') {
+    const existing = noteAt(bar.melody, hit.row, hit.step);
+    if (!existing) return;
+    bar.melody = removeNote(bar.melody, existing);
+  } else if (hit.row === drag.row && hit.step >= drag.startStep) {
+    // 右へなぞると音が伸びる
+    bar.melody = addNote(
+      bar.melody,
+      { s: drag.startStep, d: hit.step - drag.startStep + 1, n: drag.row },
+      section.steps
+    );
+  } else if (!noteAt(bar.melody, hit.row, hit.step)) {
+    // 別の行へ移ったら、そこに新しい音を置く（なぞり書き）
+    bar.melody = addNote(bar.melody, { s: hit.step, d: 1, n: hit.row }, section.steps);
+    drag.row = hit.row;
+    drag.startStep = hit.step;
+    previewRow(hit.row);
+  } else {
+    return;
+  }
+  paintNotes(grid, section, bar);
+});
+
+$('#sections').addEventListener('pointerup', () => {
+  if (drag?.mode === 'pending') commitAt(drag, drag.row, drag.startStep);
+  endDrag();
+});
+
+// スクロールが始まると pointercancel が来る。まだ何も書いていなければ何も残さない。
+$('#sections').addEventListener('pointercancel', endDrag);
+
+function endDrag() {
+  if (!drag) return;
+  const changed = drag.mode !== 'pending';
+  drag = null;
+  if (changed) persist();
+}
 
 /* --- 上部バー --- */
 $('#songTitle').addEventListener('input', (e) => { project.title = e.target.value; persist(); });
@@ -607,6 +887,16 @@ $('#patternSel').addEventListener('change', (e) => {
 $('#clickChk').addEventListener('change', (e) => {
   settings.click = e.target.checked;
   player.click = e.target.checked;
+  saveSettings(settings);
+});
+$('#chordsChk').addEventListener('change', (e) => {
+  settings.playChords = e.target.checked;
+  player.playChords = e.target.checked;
+  saveSettings(settings);
+});
+$('#melodyChk').addEventListener('change', (e) => {
+  settings.playMelody = e.target.checked;
+  player.playMelody = e.target.checked;
   saveSettings(settings);
 });
 $('#volInput').addEventListener('input', (e) => {
@@ -749,9 +1039,13 @@ fillSelect($('#effortSel'), EFFORTS, settings.effort);
 
 $('#apiKeyInput').value = settings.apiKey;
 $('#clickChk').checked = settings.click;
+$('#chordsChk').checked = settings.playChords;
+$('#melodyChk').checked = settings.playMelody;
 $('#volInput').value = String(settings.volume);
 player.pattern = settings.pattern;
 player.click = settings.click;
+player.playChords = settings.playChords;
+player.playMelody = settings.playMelody;
 player.setVolume(settings.volume);
 
 syncTopbar();

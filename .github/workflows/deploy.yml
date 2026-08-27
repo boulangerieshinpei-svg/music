@@ -1,0 +1,50 @@
+# GitHub Pages へ自動デプロイする。
+# ビルドは不要なので、リポジトリの中身をそのまま公開する。
+#
+# 初回だけ手動の設定が必要:
+#   GitHub の Settings > Pages > Build and deployment > Source を
+#   「GitHub Actions」にしてください。以降は push するたびに自動で反映されます。
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - claude/vocaloid-composition-app-uwla0x
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 走行中のデプロイは中断せず、後から来たものを1つだけ待たせる
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 公開するファイルをまとめる
+        run: |
+          mkdir -p _site
+          cp -r index.html manifest.webmanifest assets src _site/
+          # 公開物にリポジトリ運用用のファイルは含めない
+          ls -la _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

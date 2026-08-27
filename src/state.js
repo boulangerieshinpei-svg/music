@@ -21,9 +21,10 @@ export function uid(prefix = 'id') {
   return `${prefix}-${Date.now().toString(36)}-${uidCounter.toString(36)}`;
 }
 
-export function makeBar(chord = '', lyric = '', yomi = '') {
+export function makeBar(chord = '', lyric = '', yomi = '', melody = []) {
   // yomi は AI が返した読み。あるとモーラ数を正確に数えられる。
-  return { id: uid('bar'), chord, lyric, yomi };
+  // melody は { s: 開始ステップ, d: 長さ, n: スケール段数 } の配列。
+  return { id: uid('bar'), chord, lyric, yomi, melody };
 }
 
 export function makeSection(role = 'A', name = null, bars = 4) {
@@ -33,6 +34,8 @@ export function makeSection(role = 'A', name = null, bars = 4) {
     role,
     name: name || roleDef.label,
     moraPerBar: role === 'chorus' ? 8 : 7,
+    steps: 8,          // 1小節の分割数（8 = 8分音符グリッド）
+    showMelody: true,  // メロディグリッドを開いているか
     bars: Array.from({ length: bars }, () => makeBar()),
   };
 }
@@ -68,6 +71,19 @@ export function defaultProject() {
   return p;
 }
 
+/** メロディ配列を安全な形に整える（範囲外・型違いを落とす） */
+function normalizeMelody(raw, steps) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((n) => n && Number.isFinite(+n.s) && Number.isFinite(+n.n))
+    .map((n) => ({
+      s: Math.max(0, Math.min(steps - 1, Math.round(+n.s))),
+      d: Math.max(1, Math.round(+n.d || 1)),
+      n: Math.max(0, Math.min(23, Math.round(+n.n))),
+    }))
+    .map((n) => ({ ...n, d: Math.min(n.d, steps - n.s) }));
+}
+
 /** 読み込んだデータが壊れていても落ちないように整える */
 export function normalizeProject(raw) {
   const base = defaultProject();
@@ -87,16 +103,20 @@ export function normalizeProject(raw) {
   p.sections = sections.map((s) => {
     const role = ROLES.some((r) => r.id === s?.role) ? s.role : 'A';
     const bars = Array.isArray(s?.bars) ? s.bars : [];
+    const steps = [4, 8, 16].includes(+s?.steps) ? +s.steps : 8;
     return {
       id: uid('sec'),
       role,
       name: typeof s?.name === 'string' && s.name ? s.name : (ROLES.find((r) => r.id === role)?.label ?? role),
       moraPerBar: Number.isFinite(+s?.moraPerBar) ? Math.max(1, Math.min(24, Math.round(+s.moraPerBar))) : 7,
+      steps,
+      showMelody: s?.showMelody !== false,
       bars: (bars.length ? bars : [{}, {}, {}, {}]).map((b) =>
         makeBar(
           typeof b?.chord === 'string' ? b.chord : '',
           typeof b?.lyric === 'string' ? b.lyric : '',
-          typeof b?.yomi === 'string' ? b.yomi : ''
+          typeof b?.yomi === 'string' ? b.yomi : '',
+          normalizeMelody(b?.melody, steps)
         )
       ),
     };

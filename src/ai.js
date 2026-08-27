@@ -2,6 +2,8 @@
 // APIキーはブラウザの localStorage に保存され、リクエストにそのまま乗る。
 // 自分のマシンで自分のキーを使う前提のツール。共有PCや公開ホスティングでは使わないこと。
 
+import { countMora as countMoraLite } from './mora.js';
+
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const API_VERSION = '2023-06-01';
 
@@ -158,6 +160,29 @@ const CHORDS_SCHEMA = {
   additionalProperties: false,
 };
 
+const MELODY_SCHEMA = {
+  type: 'object',
+  properties: {
+    notes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          bar: { type: 'integer', description: '小節番号（0始まり）' },
+          step: { type: 'integer', description: '小節内の位置（0始まり、分割数未満）' },
+          duration: { type: 'integer', description: '長さ（ステップ数、1以上）' },
+          degree: { type: 'integer', description: 'キーのスケール上の段数。0=主音、7=1オクターブ上の主音' },
+        },
+        required: ['bar', 'step', 'duration', 'degree'],
+        additionalProperties: false,
+      },
+    },
+    comment: { type: 'string', description: 'メロディの狙いを一言で（日本語、120字以内）' },
+  },
+  required: ['notes', 'comment'],
+  additionalProperties: false,
+};
+
 const IDEAS_SCHEMA = {
   type: 'object',
   properties: {
@@ -266,6 +291,56 @@ export async function suggestChords({
     chords: (out.chords || []).filter((c) => Number.isInteger(c.index) && c.index >= 0 && c.index < section.bars.length),
     comment: out.comment || '',
   };
+}
+
+/** 歌詞とコードに合うメロディを提案してもらう */
+export async function suggestMelody({
+  apiKey, model, effort, project, section, rows = 12, instruction = '',
+}) {
+  const barLines = section.bars.map((b, i) => {
+    const mora = countMoraLite(b.yomi || b.lyric);
+    return `  ${i}小節目 | コード:${b.chord || '-'} | 歌詞:${b.lyric || '(空)'}` +
+      (mora ? ` | 音数の目安:${mora}` : ` | 音数の目安:${section.moraPerBar}`);
+  }).join('\n');
+
+  const prompt = [
+    songContext(project),
+    '',
+    `セクション: ${section.name}（${section.bars.length}小節）`,
+    `1小節の分割数: ${section.steps}（step は 0〜${section.steps - 1}）`,
+    `音程は degree で指定します。0 = ${project.key} のスケールの主音、1 = 2度上、7 = 1オクターブ上の主音。`,
+    `使える範囲は degree 0〜${rows - 1} です。この範囲を超える音は出さないでください。`,
+    '',
+    barLines,
+    instruction ? `\n作者からの指示: ${instruction}` : '',
+    '',
+    '守ること:',
+    '- 各小節の音数を「音数の目安」に合わせる（1音1モーラで歌えるように）',
+    '- 小節アタマと表拍はその小節のコードの構成音に置く',
+    '- 基本は順次進行（隣り合う degree）。跳躍は1小節に1回まで',
+    '- 歌える音域に収める。極端に飛ばさない',
+    '- セクションの役割を意識する（サビは高め・開放的、Aメロは低めで抑える）',
+    '- 音が重ならないようにする（同じ小節で step の範囲を重複させない）',
+  ].join('\n');
+
+  const out = await callClaude({
+    apiKey, model, effort,
+    system: COMPOSER_SYSTEM,
+    prompt,
+    schema: MELODY_SCHEMA,
+  });
+
+  // 範囲外の値はここで落としておく（画面側で壊れないように）
+  const notes = (out.notes || []).filter((n) =>
+    Number.isInteger(n.bar) && n.bar >= 0 && n.bar < section.bars.length &&
+    Number.isInteger(n.step) && n.step >= 0 && n.step < section.steps &&
+    Number.isInteger(n.degree) && n.degree >= 0 && n.degree < rows
+  ).map((n) => ({
+    ...n,
+    duration: Math.max(1, Math.min(section.steps - n.step, n.duration || 1)),
+  }));
+
+  return { notes, comment: out.comment || '' };
 }
 
 /** タイトル案・世界観案を出してもらう */

@@ -233,8 +233,89 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.err { border-color: var(--bad); }
 
-@media (max-width: 720px) {
-  .subbar { top: auto; position: static; }
-  .topbar { position: static; }
-  .bars { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+/* ---------- メロディグリッド ---------- */
+.mel-wrap { display: flex; flex-direction: column; gap: 3px; }
+
+.mel-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--steps), 1fr);
+  grid-template-rows: repeat(var(--rows), 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  /* 指でなぞって描けるように、グリッド上ではスクロールさせない */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
 }
+
+.mel-cell {
+  background: #10131b;
+  min-height: 11px;
+  transition: background .06s;
+}
+/* そのコードの構成音の行。ここを叩けば必ずハマる */
+.mel-cell.tone { background: #1a2233; }
+.mel-cell.root { background: #1e2a3f; }
+.mel-cell.beat { box-shadow: inset 1px 0 0 #333a4d; }
+.mel-cell:hover { background: #2b3350; }
+.mel-cell.on { background: var(--accent); }
+.mel-cell.head { background: #a8bcff; }
+
+.note-count {
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.note-count.fit { color: var(--ok); }
+.note-count.near { color: var(--warn); }
+.note-count.off { color: var(--bad); }
+
+/* ---------- スマホ ---------- */
+@media (max-width: 760px) {
+  body { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+
+  .topbar, .subbar { position: static; padding: 8px 10px; gap: 8px 10px; }
+  .topbar-right { margin-left: 0; width: 100%; }
+  .topbar-right .btn { flex: 1; }
+  .title-input { width: 100%; min-width: 120px; }
+  .brand { width: 100%; }
+
+  /* 1小節を画面幅いっぱいにして、メロディグリッドを指で押せる大きさにする */
+  .sections { padding: 10px; gap: 12px; }
+  .bars { grid-template-columns: 1fr; padding: 10px; }
+  .mel-cell { min-height: 20px; }
+  .lyric-input { min-height: 40px; }
+
+  .section-head { padding: 8px 10px; gap: 6px; }
+  .section-head .spacer { display: none; }
+  .head-group { flex-wrap: wrap; }
+  .section-head .btn { padding: 5px 9px; font-size: 13px; }
+
+  /* AI指示バーは2段にして、指示欄を広く取る */
+  .ai-bar {
+    flex-wrap: wrap; gap: 6px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  }
+  .ai-input { flex: 1 1 100%; order: 2; padding: 9px 10px; }
+  .ai-status { flex: 1 1 100%; order: 3; }
+
+  .footer { padding: 10px; }
+  .footer .btn { flex: 1 1 40%; }
+}
+
+/* 指で操作するデバイスでは hover の色変化を出さない（押した跡が残って見える） */
+@media (hover: none) {
+  /* 指では縦スワイプでページを送りたいので、縦方向のスクロールは残す。
+     音はタップで置き、長さは横方向のドラッグで決める。 */
+  .mel-grid { touch-action: pan-y; }
+  .mel-cell:hover { background: inherit; }
+  .mel-cell.tone:hover { background: #1a2233; }
+  .mel-cell.root:hover { background: #1e2a3f; }
+  .mel-cell.on:hover { background: var(--accent); }
+}
+
+/* 機能をオフにしているボタン（メロディグリッド非表示など） */
+.btn.off { opacity: .4; }
+.btn.off::after { content: ' オフ'; font-size: 10px; }
