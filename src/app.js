@@ -33,7 +33,7 @@ let project = loadLocal() || defaultProject();
 let settings = Object.assign(
   {
     apiKey: '', model: MODELS[0].id, effort: 'medium',
-    click: true, volume: 0.7, playChords: true, playMelody: true,
+    click: true, volume: 0.7, playChords: true, playMelody: true, loop: false,
   },
   loadSettings()
 );
@@ -65,9 +65,64 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-function persist() {
+/* ---- やり直し（Undo / Redo） ---- */
+
+const undoStack = [];
+const redoStack = [];
+const UNDO_LIMIT = 120;
+let baseline = JSON.stringify(project);   // 直前に保存した状態
+let lastPushAt = 0;
+let lastPushTag = '';
+
+/**
+ * 変更を保存する。すべての変更がここを通るので、直前の状態をやり直し用に積む。
+ * @param {string} tag 同じ種類の連続操作をまとめるための目印。
+ *   文字入力は1打鍵ごとに履歴を作ると戻すのが大変なので、少しの間はまとめる。
+ */
+function persist(tag = '') {
+  const now = Date.now();
+  const coalesce = tag && tag === lastPushTag && now - lastPushAt < 800;
+  if (!coalesce) {
+    undoStack.push(baseline);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0;   // 新しい操作をしたら、やり直しの先はもう使えない
+  }
+  lastPushAt = now;
+  lastPushTag = tag;
+  baseline = JSON.stringify(project);
   saveLocal(project);
   updateStats();
+  syncUndoButtons();
+}
+
+function syncUndoButtons() {
+  $('#btnUndo').disabled = !undoStack.length;
+  $('#btnRedo').disabled = !redoStack.length;
+}
+
+/** スナップショットを復元する。id ごと保存しているのでそのまま戻せる */
+function restoreSnapshot(json, pushTo) {
+  pushTo.push(JSON.stringify(project));
+  project = JSON.parse(json);
+  baseline = json;
+  lastPushTag = '';
+  saveLocal(project);
+  selection.clear();   // 元に戻すと小節の並びが変わり得るので選択は解除する
+  render();
+  syncTopbar();
+  syncUndoButtons();
+}
+
+function undo() {
+  if (!undoStack.length) { toast('これ以上戻せません', true); return; }
+  restoreSnapshot(undoStack.pop(), redoStack);
+  toast('元に戻しました');
+}
+
+function redo() {
+  if (!redoStack.length) { toast('やり直せる操作がありません', true); return; }
+  restoreSnapshot(redoStack.pop(), undoStack);
+  toast('やり直しました');
 }
 
 function sectionById(id) {
@@ -578,17 +633,25 @@ function refreshMora(barNode, section, bar) {
 /* 再生                                                                 */
 /* ------------------------------------------------------------------ */
 
-function collectBars(sectionFilter = null) {
+/**
+ * 再生するバーを集める。
+ * @param {string|null} sectionFilter このセクションだけに絞る
+ * @param {number[]} barIndexes 指定があれば、そのセクションの中でもこの小節だけに絞る
+ */
+function collectBars(sectionFilter = null, barIndexes = []) {
   const out = [];
   project.sections.forEach((sec, si) => {
     if (sectionFilter && sec.id !== sectionFilter) return;
-    sec.bars.forEach((bar, bi) => out.push({
-      chord: bar.chord,
-      pattern: resolvePattern(sec, bar),
-      melody: toPlayable(project, bar.melody, sec.steps),
-      sectionIndex: si,
-      barIndex: bi,
-    }));
+    sec.bars.forEach((bar, bi) => {
+      if (barIndexes.length && !barIndexes.includes(bi)) return;
+      out.push({
+        chord: bar.chord,
+        pattern: resolvePattern(sec, bar),
+        melody: toPlayable(project, bar.melody, sec.steps),
+        sectionIndex: si,
+        barIndex: bi,
+      });
+    });
   });
   return out;
 }
@@ -605,8 +668,12 @@ function highlight(sectionIndex, barIndex) {
 }
 
 function startPlayback(sectionId = null) {
-  const bars = collectBars(sectionId);
+  const section = sectionId ? sectionById(sectionId) : null;
+  // 小節を選んでいれば、その範囲だけを繰り返す（メロディを詰めるときに使う）
+  const picked = section ? selectedIndexes(section) : [];
+  const bars = collectBars(sectionId, picked);
   if (!bars.length) { toast('鳴らす小節がありません', true); return; }
+  if (picked.length) toast(`選択した${picked.length}小節をループ再生`);
   player.pattern = project.pattern;
   player.click = settings.click;
   player.playChords = settings.playChords;
@@ -619,7 +686,12 @@ function startPlayback(sectionId = null) {
     $('#stopAll').disabled = true;
     $('#playAll').textContent = '▶ 全体再生';
   };
-  player.play(bars, { bpm: project.bpm, beatsPerBar: project.beatsPerBar, loop: !!sectionId });
+  player.play(bars, {
+    bpm: project.bpm,
+    beatsPerBar: project.beatsPerBar,
+    // セクション／選択範囲は繰り返し、曲全体はチェックに従う
+    loop: sectionId ? true : settings.loop,
+  });
   $('#stopAll').disabled = false;
   $('#playAll').textContent = '▶ 再生中';
 }
@@ -906,7 +978,7 @@ $('#sections').addEventListener('input', (ev) => {
   switch (target.dataset.act) {
     case 'section-name':
       section.name = target.value;
-      persist();
+      persist('name:' + section.id);
       break;
     case 'mora-target': {
       const v = Math.max(1, Math.min(24, Number(target.value) || 7));
@@ -939,7 +1011,7 @@ $('#sections').addEventListener('input', (ev) => {
       if (melRow) melRow.replaceWith(renderMelodyGrid(section, bar));
       const kb = barNode.querySelector('.kb-wrap');
       if (kb) kb.replaceWith(renderKeyboard(bar));
-      persist();
+      persist('chord:' + bar.id);
       break;
     }
     case 'lyric': {
@@ -949,7 +1021,7 @@ $('#sections').addEventListener('input', (ev) => {
       refreshMora(barNode, section, bar);
       const badge = barNode.querySelector('.note-count');
       if (badge) fillNoteCount(badge, section, bar);
-      persist();
+      persist('lyric:' + bar.id);
       break;
     }
   }
@@ -1067,12 +1139,12 @@ function endDrag() {
   if (!drag) return;
   const changed = drag.mode !== 'pending';
   drag = null;
-  if (changed) persist();
+  if (changed) persist();   // 1ストローク = 1回の履歴
 }
 
 /* --- 上部バー --- */
-$('#songTitle').addEventListener('input', (e) => { project.title = e.target.value; persist(); });
-$('#themeInput').addEventListener('input', (e) => { project.theme = e.target.value; persist(); });
+$('#songTitle').addEventListener('input', (e) => { project.title = e.target.value; persist('title'); });
+$('#themeInput').addEventListener('input', (e) => { project.theme = e.target.value; persist('theme'); });
 $('#moodSel').addEventListener('change', (e) => { project.mood = e.target.value; persist(); });
 $('#bpmInput').addEventListener('change', (e) => {
   project.bpm = Math.max(40, Math.min(300, Number(e.target.value) || 120));
@@ -1105,6 +1177,12 @@ $('#patternSel').addEventListener('change', (e) => {
 $('#clickChk').addEventListener('change', (e) => {
   settings.click = e.target.checked;
   player.click = e.target.checked;
+  saveSettings(settings);
+});
+$('#btnUndo').addEventListener('click', undo);
+$('#btnRedo').addEventListener('click', redo);
+$('#loopChk').addEventListener('change', (e) => {
+  settings.loop = e.target.checked;
   saveSettings(settings);
 });
 $('#chordsChk').addEventListener('change', (e) => {
@@ -1297,6 +1375,7 @@ fillSelect($('#effortSel'), EFFORTS, settings.effort);
 $('#apiKeyInput').value = settings.apiKey;
 $('#clickChk').checked = settings.click;
 $('#chordsChk').checked = settings.playChords;
+$('#loopChk').checked = settings.loop;
 $('#melodyChk').checked = settings.playMelody;
 $('#volInput').value = String(settings.volume);
 player.pattern = project.pattern;
@@ -1307,10 +1386,19 @@ player.setVolume(settings.volume);
 
 syncTopbar();
 render();
+syncUndoButtons();
 
 window.addEventListener('keydown', (ev) => {
-  if (ev.code === 'Space' && !/^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName)) {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName);
+
+  if (ev.code === 'Space' && !typing) {
     ev.preventDefault();
     if (player.playing) player.stop(); else startPlayback(null);
+    return;
+  }
+  // 入力中の Ctrl+Z はブラウザの文字取り消しに任せる（打ち間違いを1文字戻したいはずなので）
+  if (!typing && (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') {
+    ev.preventDefault();
+    if (ev.shiftKey) redo(); else undo();
   }
 });

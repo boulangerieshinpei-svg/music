@@ -46,6 +46,8 @@
   </div>
 
   <div class="topbar-right">
+    <button id="btnUndo" class="btn ghost" title="元に戻す（Ctrl+Z）" disabled>↶</button>
+    <button id="btnRedo" class="btn ghost" title="やり直す（Ctrl+Shift+Z）" disabled>↷</button>
     <button id="playAll" class="btn primary">▶ 全体再生</button>
     <button id="stopAll" class="btn" disabled>■ 停止</button>
     <button id="openSettings" class="btn ghost" title="AI・再生の設定">⚙</button>
@@ -70,6 +72,9 @@
   </label>
   <label class="ctl">
     <input id="melodyChk" type="checkbox" checked> メロディ
+  </label>
+  <label class="ctl">
+    <input id="loopChk" type="checkbox"> ループ
   </label>
   <label class="ctl">音量
     <input id="volInput" type="range" min="0" max="1" step="0.05" value="0.7" aria-label="音量">
