@@ -8,6 +8,7 @@ import { countMora, hasKanji } from './mora.js';
 import {
   ROLES, defaultProject, normalizeProject, makeSection, makeBar, transposeProject,
   saveLocal, loadLocal, saveSettings, loadSettings, totalBars, estimateSeconds, lyricsToText,
+  PATTERN_IDS,
 } from './state.js';
 import { MOODS, generateLyrics, generateProgression } from './generator.js';
 import {
@@ -31,10 +32,19 @@ let project = loadLocal() || defaultProject();
 let settings = Object.assign(
   {
     apiKey: '', model: MODELS[0].id, effort: 'medium',
-    pattern: 'pad', click: true, volume: 0.7, playChords: true, playMelody: true,
+    click: true, volume: 0.7, playChords: true, playMelody: true,
   },
   loadSettings()
 );
+// 以前は伴奏の弾き方を設定側に持っていた。曲の一部なのでプロジェクトへ移す。
+// settings 側は消すので、この移行は1度しか走らない。
+if (settings.pattern) {
+  if (PATTERN_IDS.includes(settings.pattern)) project.pattern = settings.pattern;
+  delete settings.pattern;
+  saveSettings(settings);
+  saveLocal(project);
+}
+
 const selection = new Set();     // "sectionId#barIndex"
 const openPalettes = new Set();  // sectionId
 const player = new Player();
@@ -144,12 +154,21 @@ function syncTopbar() {
   $('#beatsSel').value = String(project.beatsPerBar);
   $('#moodSel').value = project.mood;
   $('#themeInput').value = project.theme;
+  $('#patternSel').value = project.pattern;
   updateStats();
 }
 
 /* ------------------------------------------------------------------ */
 /* セクション描画                                                       */
 /* ------------------------------------------------------------------ */
+
+/** 伴奏の弾き方を「小節 → セクション → 曲」の順で解決する */
+function resolvePattern(section, bar) {
+  return bar.pattern || section.pattern || project.pattern;
+}
+
+const PATTERN_SHORT = { pad: 'パ', arp: 'ア', stab: '刻' };
+const patternLabel = (id) => PATTERNS.find((p) => p.id === id)?.label ?? id;
 
 function moraClass(n, target) {
   const d = Math.abs(n - target);
@@ -195,6 +214,14 @@ function renderBar(section, bar, index) {
   check.dataset.act = 'select';
   check.title = '選択（AIの対象にする）';
   head.append(check, el('span', 'bar-no', `${index + 1}`), el('span', 'spacer'));
+
+  const pat = el('button', 'mini pattern-btn', bar.pattern ? PATTERN_SHORT[bar.pattern] : PATTERN_SHORT[resolvePattern(section, bar)]);
+  pat.dataset.act = 'bar-pattern';
+  if (!bar.pattern) pat.classList.add('inherited');
+  pat.title = bar.pattern
+    ? `伴奏: ${patternLabel(bar.pattern)}（この小節だけ指定）／タップで切替`
+    : `伴奏: ${patternLabel(resolvePattern(section, bar))}（上の指定に従う）／タップでこの小節だけ変える`;
+  head.append(pat);
 
   const aiBar = el('button', 'mini', '✨');
   aiBar.title = 'この小節の歌詞をAIで書き換える';
@@ -395,6 +422,21 @@ function renderSection(section, sectionIndex) {
   stepsSel.title = 'メロディグリッドの細かさ';
   stepsLabel.append(stepsSel);
 
+  const patLabel = el('label', 'ctl');
+  const patSel = el('select');
+  const inherit = el('option', null, '曲に従う');
+  inherit.value = '';
+  patSel.append(inherit);
+  for (const o of PATTERNS) {
+    const opt = el('option', null, o.label);
+    opt.value = o.id;
+    patSel.append(opt);
+  }
+  patSel.value = section.pattern || '';
+  patSel.dataset.act = 'section-pattern';
+  patSel.title = 'このセクションの伴奏の弾き方';
+  patLabel.append(document.createTextNode('伴奏'), patSel);
+
   const tools = el('div', 'head-group');
   tools.append(
     (() => {
@@ -416,7 +458,7 @@ function renderSection(section, sectionIndex) {
     mk('✕', 'delete-section', 'このセクションを削除'),
   );
 
-  head.append(tag, name, barsLabel, moraLabel, stepsLabel, el('span', 'spacer'), group, tools);
+  head.append(tag, name, barsLabel, moraLabel, stepsLabel, patLabel, el('span', 'spacer'), group, tools);
 
   const bars = el('div', 'bars');
   section.bars.forEach((bar, i) => bars.append(renderBar(section, bar, i)));
@@ -448,6 +490,7 @@ function collectBars(sectionFilter = null) {
     if (sectionFilter && sec.id !== sectionFilter) return;
     sec.bars.forEach((bar, bi) => out.push({
       chord: bar.chord,
+      pattern: resolvePattern(sec, bar),
       melody: toPlayable(project, bar.melody, sec.steps),
       sectionIndex: si,
       barIndex: bi,
@@ -470,7 +513,7 @@ function highlight(sectionIndex, barIndex) {
 function startPlayback(sectionId = null) {
   const bars = collectBars(sectionId);
   if (!bars.length) { toast('鳴らす小節がありません', true); return; }
-  player.pattern = settings.pattern;
+  player.pattern = project.pattern;
   player.click = settings.click;
   player.playChords = settings.playChords;
   player.playMelody = settings.playMelody;
@@ -646,6 +689,21 @@ $('#sections').addEventListener('click', (ev) => {
     case 'ai-bar':
       aiLyrics(section, [barIndex]);
       break;
+    case 'bar-pattern': {
+      // 「上に従う → パッド → アルペジオ → 刻み → 上に従う」の順で巡回する
+      const cycle = [null, ...PATTERN_IDS];
+      const bar = section.bars[barIndex];
+      const next = cycle[(cycle.indexOf(bar.pattern) + 1) % cycle.length];
+      // 選択している小節があれば、まとめて同じ弾き方にする
+      const targets = selectedIndexes(section);
+      const indexes = targets.includes(barIndex) ? targets : [barIndex];
+      for (const i of indexes) section.bars[i].pattern = next;
+      persist(); render();
+      toast(next
+        ? `${indexes.length}小節の伴奏を「${patternLabel(next)}」にしました`
+        : `${indexes.length}小節の伴奏を上の指定に戻しました`);
+      break;
+    }
     case 'insert-chord': {
       const targets = selectedIndexes(section);
       if (!targets.length) { toast('先に小節を選択してください（小節左上のチェック）', true); break; }
@@ -746,6 +804,10 @@ $('#sections').addEventListener('input', (ev) => {
       persist();
       break;
     }
+    case 'section-pattern':
+      section.pattern = target.value || null;
+      persist(); render();
+      break;
     case 'steps': {
       const next = Number(target.value);
       // 分割を変えたら、置いてある音符の位置と長さを比例させる
@@ -919,9 +981,10 @@ $('#transDown').addEventListener('click', () => { transposeProject(project, -1);
 $('#playAll').addEventListener('click', () => startPlayback(null));
 $('#stopAll').addEventListener('click', () => player.stop());
 $('#patternSel').addEventListener('change', (e) => {
-  settings.pattern = e.target.value;
+  // 伴奏の弾き方は曲の一部なので、設定ではなくプロジェクトに持たせる
+  project.pattern = e.target.value;
   player.pattern = e.target.value;
-  saveSettings(settings);
+  persist(); render();
 });
 $('#clickChk').addEventListener('change', (e) => {
   settings.click = e.target.checked;
@@ -1072,7 +1135,7 @@ $('#btnTestKey').addEventListener('click', async () => {
 fillSelect($('#keySel'), KEYS.map((k) => ({ id: k, label: k })), project.key);
 fillSelect($('#modeSel'), MODES, project.mode);
 fillSelect($('#moodSel'), MOODS, project.mood);
-fillSelect($('#patternSel'), PATTERNS, settings.pattern);
+fillSelect($('#patternSel'), PATTERNS, project.pattern);
 fillSelect($('#modelSel'), MODELS, settings.model);
 fillSelect($('#effortSel'), EFFORTS, settings.effort);
 
@@ -1081,7 +1144,7 @@ $('#clickChk').checked = settings.click;
 $('#chordsChk').checked = settings.playChords;
 $('#melodyChk').checked = settings.playMelody;
 $('#volInput').value = String(settings.volume);
-player.pattern = settings.pattern;
+player.pattern = project.pattern;
 player.click = settings.click;
 player.playChords = settings.playChords;
 player.playMelody = settings.playMelody;

@@ -121,9 +121,11 @@ export class Player {
 
     this._note(midiToFreq(bassMidi), t0, Math.min(barDur, secPerBeat * 2), 0.28, 'triangle');
 
-    if (this.pattern === 'pad') {
+    // 小節ごとに弾き方を変えられる。指定が無ければプレイヤー既定（＝曲の指定）を使う
+    const pattern = bar.pattern || this.pattern;
+    if (pattern === 'pad') {
       voicing.forEach((m, i) => this._note(midiToFreq(m), t0 + i * 0.012, barDur * 0.98, 0.14, 'sawtooth'));
-    } else if (this.pattern === 'arp') {
+    } else if (pattern === 'arp') {
       const steps = this.beatsPerBar * 2;
       const step = barDur / steps;
       for (let i = 0; i < steps; i++) {

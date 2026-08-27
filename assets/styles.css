@@ -319,3 +319,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 /* 機能をオフにしているボタン（メロディグリッド非表示など） */
 .btn.off { opacity: .4; }
 .btn.off::after { content: ' オフ'; font-size: 10px; }
+
+/* 小節ごとの伴奏切替ボタン。上の指定を引き継いでいる間は控えめに出す */
+.pattern-btn { min-width: 22px; }
+.pattern-btn.inherited { opacity: .45; }

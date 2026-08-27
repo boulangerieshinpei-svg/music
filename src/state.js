@@ -21,10 +21,15 @@ export function uid(prefix = 'id') {
   return `${prefix}-${Date.now().toString(36)}-${uidCounter.toString(36)}`;
 }
 
-export function makeBar(chord = '', lyric = '', yomi = '', melody = []) {
+/** 伴奏の弾き方。曲・セクション・小節の3段で指定でき、下が指定されていれば下が勝つ */
+export const PATTERN_IDS = ['pad', 'arp', 'stab'];
+const validPattern = (v, fallback = null) => (PATTERN_IDS.includes(v) ? v : fallback);
+
+export function makeBar(chord = '', lyric = '', yomi = '', melody = [], pattern = null) {
   // yomi は AI が返した読み。あるとモーラ数を正確に数えられる。
   // melody は { s: 開始ステップ, d: 長さ, n: スケール段数 } の配列。
-  return { id: uid('bar'), chord, lyric, yomi, melody };
+  // pattern が null なら、セクション（さらに曲）の指定に従う。
+  return { id: uid('bar'), chord, lyric, yomi, melody, pattern };
 }
 
 export function makeSection(role = 'A', name = null, bars = 4) {
@@ -36,6 +41,7 @@ export function makeSection(role = 'A', name = null, bars = 4) {
     moraPerBar: role === 'chorus' ? 8 : 7,
     steps: 8,          // 1小節の分割数（8 = 8分音符グリッド）
     showMelody: true,  // メロディグリッドを開いているか
+    pattern: null,     // 伴奏の弾き方。null なら曲の指定に従う
     bars: Array.from({ length: bars }, () => makeBar()),
   };
 }
@@ -52,6 +58,7 @@ export function defaultProject() {
     beatsPerBar: 4,
     mood: 'setsunai',
     theme: '',
+    pattern: 'pad',
     sections: [
       makeSection('A', 'Aメロ', 8),
       makeSection('B', 'Bメロ', 4),
@@ -97,6 +104,7 @@ export function normalizeProject(raw) {
     beatsPerBar: [2, 3, 4, 6].includes(+raw.beatsPerBar) ? +raw.beatsPerBar : 4,
     mood: typeof raw.mood === 'string' ? raw.mood : base.mood,
     theme: typeof raw.theme === 'string' ? raw.theme : '',
+    pattern: validPattern(raw.pattern, base.pattern),
     sections: [],
   };
   const sections = Array.isArray(raw.sections) ? raw.sections : [];
@@ -111,12 +119,14 @@ export function normalizeProject(raw) {
       moraPerBar: Number.isFinite(+s?.moraPerBar) ? Math.max(1, Math.min(24, Math.round(+s.moraPerBar))) : 7,
       steps,
       showMelody: s?.showMelody !== false,
+      pattern: validPattern(s?.pattern),
       bars: (bars.length ? bars : [{}, {}, {}, {}]).map((b) =>
         makeBar(
           typeof b?.chord === 'string' ? b.chord : '',
           typeof b?.lyric === 'string' ? b.lyric : '',
           typeof b?.yomi === 'string' ? b.yomi : '',
-          normalizeMelody(b?.melody, steps)
+          normalizeMelody(b?.melody, steps),
+          validPattern(b?.pattern)
         )
       ),
     };
