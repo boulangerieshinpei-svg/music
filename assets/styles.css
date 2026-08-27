@@ -17,6 +17,8 @@
 
 body {
   margin: 0;
+  /* ホーム画面から起動すると全画面になり、時計と内容が重なるので上を空ける */
+  padding-top: env(safe-area-inset-top);
   padding-bottom: 88px;
   background: var(--bg);
   color: var(--text);
@@ -116,6 +118,19 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .section-head .spacer { flex: 1; }
 .head-group { display: flex; align-items: center; gap: 6px; }
 
+/* ⋯ で開く詳細ツール。既定は閉じておき、画面を小節のために空ける */
+.head-drawer {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px;
+  background: #191d28;
+  border-bottom: 1px solid var(--line);
+}
+.head-drawer.open { display: flex; }
+.btn.active { border-color: var(--accent); color: var(--accent); }
+
 /* ---------- 小節グリッド ---------- */
 .bars {
   display: grid; gap: 8px; padding: 12px;
@@ -145,6 +160,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 }
 .lyric-input:focus { outline: none; border-color: var(--accent); }
 
+.counts { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mora {
   font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted);
   display: flex; align-items: center; gap: 6px;
@@ -194,6 +210,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 }
 .ai-input:focus { outline: none; border-color: var(--accent); }
 .ai-status { font-size: 12px; color: var(--muted); min-width: 0; }
+.ai-status:empty { display: none; }
 .ai-status.err { color: var(--bad); }
 .ai-status.ok { color: var(--ok); }
 .ai-status.busy { color: var(--accent); }
@@ -303,19 +320,47 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 
 /* ---------- スマホ ---------- */
 @media (max-width: 760px) {
-  body { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  }
 
   .topbar, .subbar { position: static; padding: 8px 10px; gap: 8px 10px; }
-  .topbar-right { margin-left: 0; width: 100%; }
-  .topbar-right .btn { flex: 1; }
+
+  /* キー・BPM・音量などは毎回は触らないので、🎛 を押したときだけ出す。
+     出しっぱなしだと上部バーだけで画面の半分が埋まる */
+  .topbar-controls, .subbar { display: none; }
+  body.panel-open .topbar-controls { display: flex; }
+  body.panel-open .subbar { display: flex; }
+  .topbar-right { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  /* 幅を分け合わせると文字が折り返してボタンが縦に伸びるので、内容なりの幅にする */
+  .topbar-right .btn { flex: 0 0 auto; white-space: nowrap; }
+
+  /* 名前とタグが同じ文字（「Aメロ」）で二重になるので、狭い画面ではタグを省く */
+  .role-tag { display: none; }
   .title-input { width: 100%; min-width: 120px; }
   .brand { width: 100%; }
 
-  /* 1小節を画面幅いっぱいにして、メロディグリッドを指で押せる大きさにする */
-  .sections { padding: 10px; gap: 12px; }
-  .bars { grid-template-columns: 1fr; padding: 10px; }
-  .mel-cell { min-height: 20px; }
-  .lyric-input { min-height: 40px; }
+  /* 1小節を画面幅いっぱいにして、メロディグリッドを指で押せる大きさにする。
+     ただし1小節が画面1枚分を超えると曲を俯瞰できないので、周辺は詰める */
+  .sections { padding: 8px; gap: 10px; }
+  .bars { grid-template-columns: 1fr; padding: 8px; gap: 8px; }
+  .bar { padding: 8px; gap: 5px; }
+  .mel-cell { min-height: 18px; }
+  .lyric-input { min-height: 36px; }
+
+  /* 鍵盤まわりは高さを詰め、音名と度数・分析は1行にまとめる */
+  .kb { height: 28px; }
+  .kb-wrap { gap: 2px; }
+  .kb-names, .kb-analysis { font-size: 9px; }
+
+  /* 凡例は場所を取るわりに毎回は要らないので、スマホでは出さない
+     （鍵盤表示に同じ色分けの説明があるため） */
+  .mel-legend { display: none; }
+
+  /* ⋯ の中身は縦に積んで押しやすくする */
+  .head-drawer { padding: 8px 10px; }
+  .head-drawer .btn { flex: 0 0 auto; }
 
   .section-head { padding: 8px 10px; gap: 6px; }
   .section-head .spacer { display: none; }
@@ -400,3 +445,20 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .kb-analysis .func { color: var(--muted); }
 .kb-analysis .hint { color: var(--warn); }
 .kb-empty { font-size: 10px; color: var(--muted); }
+
+/* ---------- コンパクト表示 ---------- */
+/* 一度に見える小節を増やすため、無くても作業できるものを省く。
+   鍵盤は「知識として見たいとき」に開けばよいので、まずここを畳む。 */
+body.compact .kb-wrap { display: none; }
+body.compact .mel-legend { display: none; }
+body.compact .bar { padding: 6px; gap: 4px; }
+body.compact .chord-input { padding: 3px 8px; font-size: 14px; }
+body.compact .lyric-input { height: 34px; min-height: 34px; padding: 4px 8px; }
+body.compact .mel-cell { min-height: 13px; }
+body.compact .mel-label { font-size: 8px; }
+body.compact .bars { gap: 6px; padding: 8px; }
+body.compact .section-head { padding: 6px 10px; }
+
+/* モーラ数と音数は並べて置くと縦が1行減り、見比べもしやすい */
+body.compact .mora { gap: 4px; }
+body.compact .mel-wrap { gap: 2px; }

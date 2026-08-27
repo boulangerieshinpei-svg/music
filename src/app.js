@@ -34,6 +34,8 @@ let settings = Object.assign(
   {
     apiKey: '', model: MODELS[0].id, effort: 'medium',
     click: true, volume: 0.7, playChords: true, playMelody: true, loop: false,
+    // 画面が狭い端末では、最初からコンパクト表示にしておく
+    compact: window.matchMedia('(max-width: 760px)').matches,
   },
   loadSettings()
 );
@@ -48,6 +50,7 @@ if (settings.pattern) {
 
 const selection = new Set();     // "sectionId#barIndex"
 const openPalettes = new Set();  // sectionId
+const openTools = new Set();     // sectionId（詳細ツールを開いているセクション）
 const player = new Player();
 let busy = false;
 
@@ -298,18 +301,24 @@ function renderBar(section, bar, index) {
   lyric.placeholder = '歌詞';
   lyric.dataset.act = 'lyric';
 
+  // 歌詞のモーラ数とメロディの音数は見比べるものなので、同じ行に並べる
+  const counts = el('div', 'counts');
   const mora = el('div', 'mora');
   fillMora(mora, section, bar);
+  counts.append(mora);
+  if (section.showMelody) {
+    const count = el('span', 'note-count');
+    fillNoteCount(count, section, bar);
+    counts.append(count);
+  }
 
   node.append(head, chord);
   if (section.showKeys) node.append(renderKeyboard(bar));
-  node.append(lyric, mora);
+  node.append(lyric, counts);
 
   if (section.showMelody) {
     const wrap = el('div', 'mel-wrap');
-    const count = el('span', 'note-count');
-    wrap.append(renderMelodyGrid(section, bar), count);
-    fillNoteCount(count, section, bar);
+    wrap.append(renderMelodyGrid(section, bar));
     node.append(wrap);
   }
   return node;
@@ -435,7 +444,7 @@ function paintNotes(grid, section, bar) {
       if (i === 0) cell.classList.add('head');
     }
   }
-  const badge = grid.closest('.mel-wrap')?.querySelector('.note-count');
+  const badge = grid.closest('.bar')?.querySelector('.note-count');
   if (badge) fillNoteCount(badge, section, bar);
 }
 
@@ -536,9 +545,6 @@ function renderSection(section, sectionIndex) {
     return b;
   };
   group.append(
-    mk('🎲 コード', 'gen-chords', 'オフラインでコード進行のたたきを作る'),
-    mk('🎲 歌詞', 'gen-lyrics', 'オフラインで歌詞のたたきを作る'),
-    mk('🎲 メロディ', 'gen-melody', 'コードと歌詞のモーラ数に合わせてメロディのたたきを作る'),
     mk('✨ AIコード', 'ai-chords', '選択した小節（未選択ならセクション全体）のコードをAIが提案', true),
     mk('✨ AI歌詞', 'ai-lyrics', '選択した小節（未選択ならセクション全体）の歌詞をAIが書き換え', true),
     mk('✨ AIメロ', 'ai-melody', '歌詞とコードに合うメロディをAIが提案', true),
@@ -584,7 +590,6 @@ function renderSection(section, sectionIndex) {
     mk('♪▼', 'mel-down', 'メロディを2度下げる（スケール上で1段。小節を選んでいればその小節だけ）'),
     mk('♪⇊', 'mel-oct-down', 'メロディを1オクターブ下げる（小節を選んでいればその小節だけ）'),
     mk('🧹', 'clear-melody', 'このセクションのメロディを消す'),
-    mk('▶', 'play-section', 'このセクションだけ再生'),
     (() => {
       const b = mk('🎹', 'toggle-keys',
         section.showKeys ? 'コードの鍵盤表示を隠す' : 'コードの鍵盤表示を出す');
@@ -598,12 +603,30 @@ function renderSection(section, sectionIndex) {
     mk('✕', 'delete-section', 'このセクションを削除'),
   );
 
-  head.append(tag, name, barsLabel, moraLabel, stepsLabel, patLabel, el('span', 'spacer'), group, tools);
+  // よく使うものだけ出し、残りは ⋯ の中に畳む。
+  // 出しっぱなしにするとヘッダだけで画面が埋まり、肝心の小節が見えなくなるため。
+  const primary = el('div', 'head-group');
+  primary.append(
+    mk('🎲 コード', 'gen-chords', 'オフラインでコード進行のたたきを作る'),
+    mk('🎲 歌詞', 'gen-lyrics', 'オフラインで歌詞のたたきを作る'),
+    mk('🎲 メロディ', 'gen-melody', 'コードと歌詞のモーラ数に合わせてメロディのたたきを作る'),
+    mk('▶', 'play-section', 'このセクションを再生（小節を選んでいればその範囲だけ繰り返す）'),
+  );
+  const more = mk('⋯', 'toggle-tools', 'そのほかの操作');
+  if (openTools.has(section.id)) more.classList.add('active');
+  primary.append(more);
+
+  head.append(tag, name, barsLabel, el('span', 'spacer'), primary);
+
+  const drawer = el('div', 'head-drawer');
+  if (openTools.has(section.id)) drawer.classList.add('open');
+  drawer.dataset.drawer = section.id;
+  drawer.append(moraLabel, stepsLabel, patLabel, group, tools);
 
   const bars = el('div', 'bars');
   section.bars.forEach((bar, i) => bars.append(renderBar(section, bar, i)));
 
-  node.append(head, bars, renderPalette(section));
+  node.append(head, drawer, bars, renderPalette(section));
   if (section.showMelody) {
     const legend = el('div', 'mel-legend');
     legend.append(
@@ -898,6 +921,13 @@ $('#sections').addEventListener('click', (ev) => {
     case 'gen-lyrics': genLyrics(section); break;
     case 'gen-melody': genMelody(section); break;
     case 'ai-melody': aiMelody(section); break;
+    case 'toggle-tools': {
+      const open = openTools.has(section.id);
+      if (open) openTools.delete(section.id); else openTools.add(section.id);
+      document.querySelector(`[data-drawer="${section.id}"]`).classList.toggle('open', !open);
+      target.classList.toggle('active', !open);
+      break;
+    }
     case 'toggle-keys':
       section.showKeys = !section.showKeys;
       persist(); render();
@@ -1179,6 +1209,19 @@ $('#clickChk').addEventListener('change', (e) => {
   player.click = e.target.checked;
   saveSettings(settings);
 });
+function applyCompact() {
+  document.body.classList.toggle('compact', !!settings.compact);
+}
+$('#compactChk').addEventListener('change', (e) => {
+  settings.compact = e.target.checked;
+  saveSettings(settings);
+  applyCompact();
+});
+// 画面が狭いときは曲の設定を畳んでおく。上部バーだけで画面の半分を使ってしまうため
+$('#btnPanel').addEventListener('click', () => {
+  const open = document.body.classList.toggle('panel-open');
+  $('#btnPanel').classList.toggle('active', open);
+});
 $('#btnUndo').addEventListener('click', undo);
 $('#btnRedo').addEventListener('click', redo);
 $('#loopChk').addEventListener('change', (e) => {
@@ -1376,6 +1419,8 @@ $('#apiKeyInput').value = settings.apiKey;
 $('#clickChk').checked = settings.click;
 $('#chordsChk').checked = settings.playChords;
 $('#loopChk').checked = settings.loop;
+$('#compactChk').checked = !!settings.compact;
+applyCompact();
 $('#melodyChk').checked = settings.playMelody;
 $('#volInput').value = String(settings.volume);
 player.pattern = project.pattern;
