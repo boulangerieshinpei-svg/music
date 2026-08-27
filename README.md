@@ -101,15 +101,30 @@ src/
 
 ## スマホで使う（デプロイ）
 
-`.github/workflows/deploy.yml` を入れてあるので、GitHub Pages に自動デプロイできます。
+GitHub Pages に自動デプロイする workflow（`.github/workflows/deploy.yml`）を入れてあります。
+**初回だけ、GitHub 上で2つ設定してください。**
 
-初回だけ手動の設定が必要です:
+1. **Settings → General → 最下部 Danger Zone → Change repository visibility → Public**
+   （Private のまま Pages を使うには有料プランが必要なため）
+2. **Settings → Pages → Build and deployment → Source → GitHub Actions**
 
-1. GitHub の **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする
-2. デフォルトブランチに push する（以降は push のたびに自動で反映されます）
+これで push のたびに自動で反映されます。公開URLは
+`https://<ユーザー名>.github.io/music/` です。
 
-公開された URL をスマホで開き、ブラウザの「ホーム画面に追加」をすると、
+スマホでそのURLを開き、ブラウザの「ホーム画面に追加」をすると、
 アドレスバーなしのアプリとして起動します（`manifest.webmanifest` を同梱）。
+
+### Public にして大丈夫か
+
+このリポジトリに秘密情報は含まれていません。
+
+- **APIキーはコミットされません。** 各自が画面から入力し、その端末のブラウザの
+  `localStorage` にだけ保存されます。リポジトリにもサーバーにも残りません
+- **作った曲データもコミットされません。** 同じく localStorage と、手動で書き出す JSON にだけ入ります
+
+公開されるのはアプリのコードだけです。
+逆に、URLを知っている人は誰でもアプリを開けますが、**その人が使えるのはその人自身のAPIキーだけ**で、
+あなたのキーや曲データが見えることはありません。
 
 ### Firebase ではなく GitHub Pages にした理由
 
@@ -117,10 +132,12 @@ src/
 Firebase を使っても Hosting しか出番がなく、Firestore / Auth / Functions は丸ごと遊びます。
 リポジトリが既に GitHub にあるので、Pages なら**アカウントも課金設定も追加せず**に自動デプロイまで済みます。
 
-Firebase を選ぶ意味が出てくるのは、**APIキーをサーバー側に隠したくなったとき**です。
-今の作りだとスマホでもキーを1度手入力する必要があり、キーは端末のブラウザに保存されます。
-これが煩わしい・避けたい場合は、キーを持った中継サーバー（Firebase Functions や Cloudflare Workers）を挟む形になります。
-そのときは声をかけてください。
+Firebase（や Cloudflare Workers）を選ぶ意味が出てくるのは、**APIキーをサーバー側に隠したくなったとき**です。
+今の作りだとスマホでもキーを1度手入力する必要があります。
+これが煩わしい・避けたい場合は、キーを持った中継サーバーを挟む形になります。
+
+なお、リポジトリを Private のままにしたい場合は、Cloudflare Pages や Netlify なら
+無料で private リポジトリから自動デプロイできます。
 
 ## 制限
 

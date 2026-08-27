@@ -2,8 +2,10 @@
 # ビルドは不要なので、リポジトリの中身をそのまま公開する。
 #
 # 初回だけ手動の設定が必要:
-#   GitHub の Settings > Pages > Build and deployment > Source を
-#   「GitHub Actions」にしてください。以降は push するたびに自動で反映されます。
+#   1. Settings > General > Danger Zone > Change visibility で Public にする
+#      （Private のまま Pages を使うには有料プランが必要なため）
+#   2. Settings > Pages > Build and deployment > Source を「GitHub Actions」にする
+#   以降は push するたびに自動で反映されます。
 
 name: Deploy to GitHub Pages
 
@@ -36,8 +38,13 @@ jobs:
       - name: 公開するファイルをまとめる
         run: |
           mkdir -p _site
-          cp -r index.html manifest.webmanifest assets src _site/
-          # 公開物にリポジトリ運用用のファイルは含めない
+          # リポジトリの中身をそのまま公開する。
+          # 個別にコピーするとファイルを足したときに載せ忘れるので、除外指定にしている。
+          rsync -a ./ _site/ \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude '_site'
           ls -la _site
 
       - uses: actions/configure-pages@v5
