@@ -205,6 +205,93 @@ export const PROGRESSIONS = [
   { id: 'ballad',   name: 'バラード定番',         mode: 'major', chords: ['C', 'Am', 'Dm7', 'G7'],         note: '王道の1625。安心の響き' },
 ];
 
+/** ルートからの音程(半音) -> 度数の呼び名 */
+const DEGREE_LABELS = {
+  0: 'R', 1: '♭9', 2: '9', 3: '♭3', 4: '3', 5: '4', 6: '♭5',
+  7: '5', 8: '♯5', 9: '6', 10: '♭7', 11: 'M7', 13: '♭9', 14: '9',
+};
+
+const LETTERS = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+const LETTER_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+// ルートから何度上か。3度なら E系、7度なら B系…と、音名の文字を決めるのに使う
+const INTERVAL_DEGREE = { 0: 1, 1: 2, 2: 2, 3: 3, 4: 3, 5: 4, 6: 5, 7: 5, 8: 5, 9: 6, 10: 7, 11: 7, 13: 2, 14: 2 };
+
+/**
+ * ルートから積み上げて音名を綴る。
+ * ピッチクラスから機械的に付けると Fm7 が「F G# C D#」になってしまうので、
+ * 度数から文字を決めて、あとから臨時記号を合わせる（正しくは「F Ab C Eb」）。
+ */
+function spellFromRoot(rootName, rootPc, interval) {
+  const rootLetter = rootName[0].toUpperCase();
+  const degree = INTERVAL_DEGREE[interval] ?? 1;
+  const letter = LETTERS[(LETTERS.indexOf(rootLetter) + degree - 1) % 7];
+  const targetPc = ((rootPc + interval) % 12 + 12) % 12;
+  // -6..+5 に収めてから記号にする
+  const alter = ((targetPc - LETTER_PC[letter] + 18) % 12) - 6;
+  const mark = alter > 0 ? '#'.repeat(alter) : 'b'.repeat(-alter);
+  return letter + mark;
+}
+
+/** コードの構成音を「音名 + 度数」で返す。何を押さえているかを言葉で確かめる用 */
+export function chordToneInfo(name) {
+  const c = parseChord(name);
+  if (!c) return [];
+  return intervalsFor(c.quality).map((iv) => ({
+    pc: ((c.rootPc + iv) % 12 + 12) % 12,
+    name: spellFromRoot(c.root, c.rootPc, iv),
+    degree: DEGREE_LABELS[iv] ?? `+${iv}`,
+    interval: iv,
+  }));
+}
+
+const ROMAN_MAJOR = { 0: 'I', 2: 'II', 4: 'III', 5: 'IV', 7: 'V', 9: 'VI', 11: 'VII' };
+const ROMAN_ALT = { 1: '♭II', 3: '♭III', 6: '♯IV', 8: '♭VI', 10: '♭VII' };
+// 度数ごとの働き。トニック=安定、サブドミナント=動き出し、ドミナント=緊張
+const FUNCTION_MAJOR = { I: 'トニック', III: 'トニック', VI: 'トニック', II: 'サブドミナント', IV: 'サブドミナント', V: 'ドミナント', VII: 'ドミナント' };
+const FUNCTION_MINOR = { I: 'トニック', '♭III': 'トニック', '♭VI': 'サブドミナント', II: 'サブドミナント', IV: 'サブドミナント', V: 'ドミナント', VII: 'ドミナント' };
+
+const isDominant7 = (q) => /^(7|9|7b9|7#5|13)$/.test(q.replace(/[()（）\s]/g, ''));
+const isMinorish = (q) => /^m(?!aj)/.test(q);
+
+/**
+ * コードがキーの中でどういう位置づけかを調べる。
+ * @returns {{roman:string, degree:string, func:string, hint:string}|null}
+ */
+export function analyzeChord(name, key, mode) {
+  const c = parseChord(name);
+  if (!c) return null;
+  const keyPc = noteToPc(key);
+  const iv = ((c.rootPc - keyPc) % 12 + 12) % 12;
+
+  // マイナーキーは平行短調の度数で読む（Aマイナーの Am を I とする）
+  let degree = ROMAN_MAJOR[iv] ?? ROMAN_ALT[iv] ?? '?';
+  if (mode === 'minor') {
+    const MINOR_ROMAN = { 0: 'I', 2: 'II', 3: '♭III', 5: 'IV', 7: 'V', 8: '♭VI', 10: '♭VII' };
+    degree = MINOR_ROMAN[iv] ?? ROMAN_ALT[iv] ?? ROMAN_MAJOR[iv] ?? '?';
+  }
+
+  // 小文字にするとマイナーコードだと分かる、という慣習に合わせる
+  const roman = (isMinorish(c.quality) ? degree.toLowerCase() : degree) + c.quality;
+  const table = mode === 'minor' ? FUNCTION_MINOR : FUNCTION_MAJOR;
+  const func = table[degree] ?? '';
+
+  const diatonic = (mode === 'minor' ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11]).includes(iv);
+  let hint = '';
+  if (isDominant7(c.quality) && degree !== 'V') {
+    // 完全5度下のコードへ進みたがる音
+    const target = pcToNote(c.rootPc + 5, keyPrefersFlats(key, mode));
+    hint = `セカンダリドミナント（${target} へ引っ張る）`;
+    // 本来の度数の働きより「次へ引っ張る」性格が強いので、働きの表示は出さない
+    return { roman, degree, func: '', hint, diatonic: false };
+  } else if (!diatonic) {
+    hint = '借用コード（キー外の響き）';
+  } else if (isMinorish(c.quality) && degree === 'IV' && mode === 'major') {
+    // 「サブドミナント」と二重に出ると読みにくいので、こちらだけ出す
+    return { roman, degree, func: '', hint: 'サブドミナントマイナー（切なくなる）', diatonic: false };
+  }
+  return { roman, degree, func, hint, diatonic };
+}
+
 /** キーからスケール上の音（MIDIノート番号）を作る */
 export function scaleNotes(key, mode, octave = 4) {
   const rootPc = noteToPc(key);

@@ -41,6 +41,7 @@ export function makeSection(role = 'A', name = null, bars = 4) {
     moraPerBar: role === 'chorus' ? 8 : 7,
     steps: 8,          // 1小節の分割数（8 = 8分音符グリッド）
     showMelody: true,  // メロディグリッドを開いているか
+    showKeys: true,    // コードの鍵盤表示を開いているか
     pattern: null,     // 伴奏の弾き方。null なら曲の指定に従う
     bars: Array.from({ length: bars }, () => makeBar()),
   };
@@ -119,6 +120,7 @@ export function normalizeProject(raw) {
       moraPerBar: Number.isFinite(+s?.moraPerBar) ? Math.max(1, Math.min(24, Math.round(+s.moraPerBar))) : 7,
       steps,
       showMelody: s?.showMelody !== false,
+      showKeys: s?.showKeys !== false,
       pattern: validPattern(s?.pattern),
       bars: (bars.length ? bars : [{}, {}, {}, {}]).map((b) =>
         makeBar(

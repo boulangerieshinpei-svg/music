@@ -352,3 +352,51 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 /* 小節ごとの伴奏切替ボタン。上の指定を引き継いでいる間は控えめに出す */
 .pattern-btn { min-width: 22px; }
 .pattern-btn.inherited { opacity: .45; }
+
+/* ---------- コードの鍵盤表示 ---------- */
+.kb-wrap { display: flex; flex-direction: column; gap: 4px; }
+
+.kb {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: 34px;
+  background: #0d1017;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.kb:hover { border-color: var(--accent); }
+
+.kb-key.white {
+  border-right: 1px solid #23283a;
+  background: #e8eaf0;
+}
+.kb-key.white:last-of-type { border-right: none; }
+.kb-key.black {
+  position: absolute;
+  top: 0;
+  width: calc(100% / 7 * 0.6);
+  height: 60%;
+  background: #1a1d26;
+  border-radius: 0 0 2px 2px;
+  z-index: 2;
+}
+/* 押さえる鍵。ルートだけ色を変えて、どこが根っこか分かるようにする */
+.kb-key.white.on   { background: #7c9cff; }
+.kb-key.white.root { background: #b784e0; }
+.kb-key.black.on   { background: #4a6bd0; }
+.kb-key.black.root { background: #8a53c2; }
+
+.kb-names { display: flex; gap: 5px; flex-wrap: wrap; font-size: 10px; }
+.kb-name { color: var(--muted); white-space: nowrap; }
+.kb-name b { color: var(--text); font-weight: 700; }
+.kb-name.root b { color: #c9a6e8; }
+.kb-name .deg { opacity: .7; margin-left: 1px; }
+
+.kb-analysis { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 10px; }
+.kb-analysis .roman { color: var(--accent); font-weight: 700; }
+.kb-analysis .func { color: var(--muted); }
+.kb-analysis .hint { color: var(--warn); }
+.kb-empty { font-size: 10px; color: var(--muted); }

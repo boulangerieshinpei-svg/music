@@ -2,7 +2,7 @@
 
 import {
   KEYS, MODES, diatonicChords, spiceChords, PROGRESSIONS, progressionInKey, parseChord,
-  midiToFreq, scaleIndexName,
+  midiToFreq, scaleIndexName, chordToneInfo, analyzeChord, midiToFreq as freqOf,
 } from './theory.js';
 import { countMora, hasKanji } from './mora.js';
 import {
@@ -246,7 +246,9 @@ function renderBar(section, bar, index) {
   const mora = el('div', 'mora');
   fillMora(mora, section, bar);
 
-  node.append(head, chord, lyric, mora);
+  node.append(head, chord);
+  if (section.showKeys) node.append(renderKeyboard(bar));
+  node.append(lyric, mora);
 
   if (section.showMelody) {
     const wrap = el('div', 'mel-wrap');
@@ -263,6 +265,63 @@ function renderBar(section, bar, index) {
  * 行 = キーのスケール段数（上ほど高い）、列 = 小節の分割。
  * そのコードの構成音の行に色を敷いてあるので、光っている行を叩けば必ずハマる。
  */
+// 鍵盤の並び。白鍵7つ＋黒鍵5つで1オクターブ
+const WHITE_PCS = [0, 2, 4, 5, 7, 9, 11];
+// 黒鍵は「左から何番目の白鍵の右肩に乗るか」で位置を決める
+const BLACK_KEYS = [{ pc: 1, after: 0 }, { pc: 3, after: 1 }, { pc: 6, after: 3 }, { pc: 8, after: 4 }, { pc: 10, after: 5 }];
+
+/**
+ * そのコードで押さえる鍵盤を描く。
+ * ルートと構成音を塗り分け、下に音名と度数を出して、何を押さえているか言葉でも分かるようにする。
+ */
+function renderKeyboard(bar) {
+  const wrap = el('div', 'kb-wrap');
+  const info = chordToneInfo(bar.chord);
+  if (!info.length) {
+    wrap.append(el('div', 'kb-empty', 'コードを入れると押さえる鍵盤が出ます'));
+    return wrap;
+  }
+
+  const byPc = new Map();
+  for (const t of info) if (!byPc.has(t.pc)) byPc.set(t.pc, t);
+  const rootPc = info[0].pc;
+
+  const kb = el('div', 'kb');
+  kb.dataset.chord = bar.chord;
+  kb.title = `${bar.chord} を鳴らす`;
+
+  WHITE_PCS.forEach((pc) => {
+    const k = el('div', 'kb-key white');
+    if (byPc.has(pc)) k.classList.add(pc === rootPc ? 'root' : 'on');
+    kb.append(k);
+  });
+  for (const { pc, after } of BLACK_KEYS) {
+    const k = el('div', 'kb-key black');
+    // 白鍵の幅を 1 として、右肩の位置に置く
+    k.style.left = `calc(${after + 1} * (100% / 7) - (100% / 7) * 0.3)`;
+    if (byPc.has(pc)) k.classList.add(pc === rootPc ? 'root' : 'on');
+    kb.append(k);
+  }
+
+  const names = el('div', 'kb-names');
+  for (const t of info) {
+    const chip = el('span', 'kb-name' + (t.pc === rootPc ? ' root' : ''));
+    chip.append(el('b', null, t.name), el('span', 'deg', t.degree));
+    names.append(chip);
+  }
+
+  const a = analyzeChord(bar.chord, project.key, project.mode);
+  const analysis = el('div', 'kb-analysis');
+  if (a) {
+    analysis.append(el('span', 'roman', a.roman));
+    if (a.func) analysis.append(el('span', 'func', a.func));
+    if (a.hint) analysis.append(el('span', 'hint', a.hint));
+  }
+
+  wrap.append(kb, names, analysis);
+  return wrap;
+}
+
 function renderMelodyGrid(section, bar) {
   const wrap = el('div', 'mel-row');
   wrap.style.setProperty('--rows', MELODY_ROWS);
@@ -471,7 +530,13 @@ function renderSection(section, sectionIndex) {
     mk('♪⇊', 'mel-oct-down', 'メロディを1オクターブ下げる（小節を選んでいればその小節だけ）'),
     mk('🧹', 'clear-melody', 'このセクションのメロディを消す'),
     mk('▶', 'play-section', 'このセクションだけ再生'),
-    mk('🎹', 'toggle-palette', 'コードパレットを開閉'),
+    (() => {
+      const b = mk('🎹', 'toggle-keys',
+        section.showKeys ? 'コードの鍵盤表示を隠す' : 'コードの鍵盤表示を出す');
+      if (!section.showKeys) b.classList.add('off');
+      return b;
+    })(),
+    mk('🎨', 'toggle-palette', 'コードパレットを開閉'),
     mk('↑', 'move-up', '上へ'),
     mk('↓', 'move-down', '下へ'),
     mk('複製', 'duplicate', 'このセクションを複製'),
@@ -761,6 +826,10 @@ $('#sections').addEventListener('click', (ev) => {
     case 'gen-lyrics': genLyrics(section); break;
     case 'gen-melody': genMelody(section); break;
     case 'ai-melody': aiMelody(section); break;
+    case 'toggle-keys':
+      section.showKeys = !section.showKeys;
+      persist(); render();
+      break;
     case 'toggle-melody':
       section.showMelody = !section.showMelody;
       persist(); render();
@@ -811,6 +880,22 @@ $('#sections').addEventListener('click', (ev) => {
   }
 });
 
+// 鍵盤をタップしたらそのコードを鳴らす。押さえる形と響きを結び付けられるように
+$('#sections').addEventListener('click', (ev) => {
+  const kb = ev.target.closest('.kb');
+  if (!kb) return;
+  const tones = chordToneInfo(kb.dataset.chord);
+  if (!tones.length) return;
+  const rootMidi = 48 + tones[0].pc;   // C3 あたりを基準に積む
+  tones.forEach((t, i) => {
+    setTimeout(() => {
+      try {
+        player.previewNote(freqOf(rootMidi + t.interval), 0.7);
+      } catch { /* 音が出せない環境では何もしない */ }
+    }, i * 45);
+  });
+});
+
 $('#sections').addEventListener('input', (ev) => {
   const target = ev.target.closest('[data-act]');
   if (!target) return;
@@ -852,6 +937,8 @@ $('#sections').addEventListener('input', (ev) => {
       // コードが変わるとグリッドで光る行（構成音）も変わる
       const melRow = barNode.querySelector('.mel-row');
       if (melRow) melRow.replaceWith(renderMelodyGrid(section, bar));
+      const kb = barNode.querySelector('.kb-wrap');
+      if (kb) kb.replaceWith(renderKeyboard(bar));
       persist();
       break;
     }
