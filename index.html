@@ -134,6 +134,14 @@
       <label class="field">APIキー
         <input id="apiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off">
       </label>
+      <label class="field">ワークスペースID（必要な場合のみ）
+        <input id="workspaceInput" type="text" placeholder="wrkspc_..." autocomplete="off" spellcheck="false">
+      </label>
+      <p class="hint">
+        「anthropic-workspace-id is required」というエラーが出たときだけ入れてください。
+        コンソールの Settings → Workspaces で、対象のワークスペースを開くと
+        <code>wrkspc_</code> から始まるIDが確認できます。
+      </p>
       <label class="field">モデル
         <select id="modelSel"></select>
       </label>

@@ -100,7 +100,17 @@ AI が書いた歌詞は読み（yomi）も一緒に返るので `♪` が付き
 **自分のPCで自分のキーを使う前提**のツールです。
 共有PCや、誰でも開ける場所にホスティングして使わないでください。
 
-モデルは Opus 5 / Sonnet 5 / Haiku 4.5 から選べます。迷ったら Opus 5。
+モデルは Opus 5 / Sonnet 5 / Haiku 4.5 から選べます。
+試行錯誤の段階は Haiku か Sonnet、詰めるときだけ Opus に切り替えるのが実用的です。
+
+### `anthropic-workspace-id is required` と出たとき
+
+ID連携（Workload Identity Federation）に紐づいたキーを使うと、
+どのワークスペースでのリクエストかを明示する必要があります。
+⚙ の **ワークスペースID** に、コンソールの Settings → Workspaces で確認できる
+`wrkspc_` から始まるIDを入れてください。入れると自動で `anthropic-workspace-id` ヘッダが付きます。
+
+通常のAPIキーでは不要なので、このエラーが出たときだけ設定すれば大丈夫です。
 
 ## ファイル構成
 

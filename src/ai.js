@@ -40,7 +40,9 @@ export class AIError extends Error {
  * Messages API を叩いて、JSON スキーマに沿った結果を受け取る。
  * Opus 5 系は assistant prefill が使えないので、構造化出力で JSON を固定する。
  */
-async function callClaude({ apiKey, model, system, prompt, schema, effort = 'medium', maxTokens = 8000 }) {
+async function callClaude({
+  apiKey, workspaceId = '', model, system, prompt, schema, effort = 'medium', maxTokens = 8000,
+}) {
   if (!apiKey) throw new AIError('APIキーが設定されていません。設定パネルから入力してください。', 'no-key');
 
   const caps = capsFor(model);
@@ -61,6 +63,8 @@ async function callClaude({ apiKey, model, system, prompt, schema, effort = 'med
     // ブラウザから直接叩くための明示的なオプトイン
     'anthropic-dangerous-direct-browser-access': 'true',
   };
+  // ID連携キーの場合、どのワークスペースでの実行かを明示しないと 400 になる
+  if (workspaceId) headers['anthropic-workspace-id'] = workspaceId;
   if (caps.fallbacks) {
     // 安全分類による refusal 時に、同じリクエストを別モデルで自動リトライさせる
     body.fallbacks = 'default';
@@ -90,6 +94,12 @@ async function callClaude({ apiKey, model, system, prompt, schema, effort = 'med
       const err = await res.json();
       detail = err?.error?.message || '';
     } catch { /* JSON でないエラー本文は無視 */ }
+    if (res.status === 400 && /workspace/i.test(detail)) {
+      throw new AIError(
+        'このキーはワークスペースIDが必要です。⚙ の「ワークスペースID」に wrkspc_ から始まるIDを入れてください。',
+        'workspace'
+      );
+    }
     if (res.status === 401) throw new AIError('APIキーが正しくありません（401）。', 'auth');
     if (res.status === 429) throw new AIError('レート制限に達しました（429）。少し待ってから再試行してください。', 'rate');
     if (res.status >= 500) throw new AIError(`APIが一時的にエラーを返しました（${res.status}）。再試行してください。`, 'server');
@@ -236,7 +246,8 @@ function sectionContext(section) {
  * @param {number[]} opts.targetIndexes 対象の小節番号。空なら全小節
  */
 export async function writeLyrics({
-  apiKey, model, effort, project, section, targetIndexes = [], instruction = '', keepMora = true,
+  apiKey, workspaceId, model, effort, project, section,
+  targetIndexes = [], instruction = '', keepMora = true,
 }) {
   const targets = targetIndexes.length ? targetIndexes : section.bars.map((_, i) => i);
   const prompt = [
@@ -254,7 +265,7 @@ export async function writeLyrics({
   ].join('\n');
 
   const out = await callClaude({
-    apiKey, model, effort,
+    apiKey, workspaceId, model, effort,
     system: LYRICIST_SYSTEM,
     prompt,
     schema: LINES_SCHEMA,
@@ -267,7 +278,7 @@ export async function writeLyrics({
 
 /** セクションのコード進行を提案してもらう */
 export async function suggestChords({
-  apiKey, model, effort, project, section, instruction = '', targetIndexes = [],
+  apiKey, workspaceId, model, effort, project, section, instruction = '', targetIndexes = [],
 }) {
   const targets = targetIndexes.length ? targetIndexes : section.bars.map((_, i) => i);
   const prompt = [
@@ -282,7 +293,7 @@ export async function suggestChords({
   ].join('\n');
 
   const out = await callClaude({
-    apiKey, model, effort,
+    apiKey, workspaceId, model, effort,
     system: COMPOSER_SYSTEM,
     prompt,
     schema: CHORDS_SCHEMA,
@@ -295,7 +306,7 @@ export async function suggestChords({
 
 /** 歌詞とコードに合うメロディを提案してもらう */
 export async function suggestMelody({
-  apiKey, model, effort, project, section, rows = 12, instruction = '',
+  apiKey, workspaceId, model, effort, project, section, rows = 12, instruction = '',
 }) {
   const barLines = section.bars.map((b, i) => {
     const mora = countMoraLite(b.yomi || b.lyric);
@@ -324,7 +335,7 @@ export async function suggestMelody({
   ].join('\n');
 
   const out = await callClaude({
-    apiKey, model, effort,
+    apiKey, workspaceId, model, effort,
     system: COMPOSER_SYSTEM,
     prompt,
     schema: MELODY_SCHEMA,
@@ -344,7 +355,7 @@ export async function suggestMelody({
 }
 
 /** タイトル案・世界観案を出してもらう */
-export async function suggestIdeas({ apiKey, model, effort, project, instruction = '' }) {
+export async function suggestIdeas({ apiKey, workspaceId, model, effort, project, instruction = '' }) {
   const lyricDump = project.sections
     .map((s) => `[${s.name}]\n` + s.bars.map((b) => b.lyric).filter(Boolean).join('\n'))
     .join('\n\n');
@@ -359,7 +370,7 @@ export async function suggestIdeas({ apiKey, model, effort, project, instruction
   ].join('\n');
 
   return callClaude({
-    apiKey, model, effort,
+    apiKey, workspaceId, model, effort,
     system: LYRICIST_SYSTEM,
     prompt,
     schema: IDEAS_SCHEMA,
@@ -368,9 +379,10 @@ export async function suggestIdeas({ apiKey, model, effort, project, instruction
 }
 
 /** APIキーの疎通確認（最小のリクエストを1回投げる） */
-export async function testKey({ apiKey, model }) {
+export async function testKey({ apiKey, workspaceId, model }) {
   await callClaude({
     apiKey,
+    workspaceId,
     model,
     effort: 'low',
     maxTokens: 1000,

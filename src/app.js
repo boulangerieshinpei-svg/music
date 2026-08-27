@@ -45,7 +45,7 @@ let songId = opening.id;
 let project = opening.project;
 let settings = Object.assign(
   {
-    apiKey: '', model: MODELS[0].id, effort: 'medium',
+    apiKey: '', workspaceId: '', model: MODELS[0].id, effort: 'medium',
     click: true, volume: 0.7, playChords: true, playMelody: true, loop: false,
     // 画面が狭い端末では、最初からコンパクト表示にしておく
     compact: window.matchMedia('(max-width: 760px)').matches,
@@ -200,6 +200,7 @@ async function runAI(label, fn) {
 
 const aiOpts = () => ({
   apiKey: settings.apiKey,
+  workspaceId: settings.workspaceId,
   model: settings.model,
   effort: settings.effort,
   project,
@@ -1518,11 +1519,17 @@ $('#apiKeyInput').addEventListener('input', (e) => {
   settings.apiKey = e.target.value.trim();
   saveSettings(settings);
 });
+$('#workspaceInput').addEventListener('input', (e) => {
+  settings.workspaceId = e.target.value.trim();
+  saveSettings(settings);
+});
 $('#modelSel').addEventListener('change', (e) => { settings.model = e.target.value; saveSettings(settings); });
 $('#effortSel').addEventListener('change', (e) => { settings.effort = e.target.value; saveSettings(settings); });
 $('#btnClearKey').addEventListener('click', () => {
   settings.apiKey = '';
+  settings.workspaceId = '';
   $('#apiKeyInput').value = '';
+  $('#workspaceInput').value = '';
   saveSettings(settings);
   $('#keyStatus').textContent = 'キーを削除しました';
   $('#keyStatus').className = 'ai-status';
@@ -1532,7 +1539,11 @@ $('#btnTestKey').addEventListener('click', async () => {
   status.textContent = '接続中…';
   status.className = 'ai-status busy';
   try {
-    await testKey({ apiKey: settings.apiKey, model: settings.model });
+    await testKey({
+      apiKey: settings.apiKey,
+      workspaceId: settings.workspaceId,
+      model: settings.model,
+    });
     status.textContent = '接続できました';
     status.className = 'ai-status ok';
   } catch (e) {
@@ -1553,6 +1564,7 @@ fillSelect($('#modelSel'), MODELS, settings.model);
 fillSelect($('#effortSel'), EFFORTS, settings.effort);
 
 $('#apiKeyInput').value = settings.apiKey;
+$('#workspaceInput').value = settings.workspaceId || '';
 $('#clickChk').checked = settings.click;
 $('#chordsChk').checked = settings.playChords;
 $('#loopChk').checked = settings.loop;
