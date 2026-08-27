@@ -236,6 +236,34 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 /* ---------- メロディグリッド ---------- */
 .mel-wrap { display: flex; flex-direction: column; gap: 3px; }
 
+/* 音名のラベル列 + グリッド本体。行の高さを揃えるため同じ gap と border を持たせる */
+.mel-row { display: grid; grid-template-columns: 20px 1fr; gap: 3px; }
+.mel-labels {
+  display: grid;
+  grid-template-rows: repeat(var(--rows), 1fr);
+  gap: 1px;
+  border: 1px solid transparent;
+}
+.mel-label {
+  display: flex; align-items: center; justify-content: flex-end;
+  font-size: 9px; line-height: 1; color: #5b6478; padding-right: 2px;
+  white-space: nowrap;
+}
+.mel-label.tone { color: #8fb4e8; }
+.mel-label.root { color: #c9a6e8; font-weight: 700; }
+
+.mel-legend {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 0 12px 8px; font-size: 11px; color: var(--muted);
+}
+.mel-legend .swatch {
+  width: 14px; height: 10px; border-radius: 2px; background: #0d1017;
+  border: 1px solid var(--line); margin-left: 8px;
+}
+.mel-legend .swatch:first-child { margin-left: 0; }
+.mel-legend .swatch.tone { background: #27405e; }
+.mel-legend .swatch.root { background: #4a3a63; }
+
 .mel-grid {
   display: grid;
   grid-template-columns: repeat(var(--steps), 1fr);
@@ -253,13 +281,14 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 }
 
 .mel-cell {
-  background: #10131b;
+  background: #0d1017;
   min-height: 11px;
   transition: background .06s;
 }
-/* そのコードの構成音の行。ここを叩けば必ずハマる */
-.mel-cell.tone { background: #1a2233; }
-.mel-cell.root { background: #1e2a3f; }
+/* そのコードの構成音の行。ここを叩けば必ずハマる。
+   「置いていい場所」が明るく見えるよう、コード外との差をはっきりつける */
+.mel-cell.tone { background: #27405e; }
+.mel-cell.root { background: #4a3a63; }
 .mel-cell.beat { box-shadow: inset 1px 0 0 #333a4d; }
 .mel-cell:hover { background: #2b3350; }
 .mel-cell.on { background: var(--accent); }
@@ -311,8 +340,8 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
      音はタップで置き、長さは横方向のドラッグで決める。 */
   .mel-grid { touch-action: pan-y; }
   .mel-cell:hover { background: inherit; }
-  .mel-cell.tone:hover { background: #1a2233; }
-  .mel-cell.root:hover { background: #1e2a3f; }
+  .mel-cell.tone:hover { background: #27405e; }
+  .mel-cell.root:hover { background: #4a3a63; }
   .mel-cell.on:hover { background: var(--accent); }
 }
 

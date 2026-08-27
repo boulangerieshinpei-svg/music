@@ -11,6 +11,7 @@ import {
   PATTERN_IDS,
 } from './state.js';
 import { MOODS, generateLyrics, generateProgression } from './generator.js';
+import { toMidi, toMusicXML, kanaLyrics } from './export.js';
 import {
   MELODY_ROWS, STEP_OPTIONS, rowToMidi, chordToneRows, noteAt, addNote, removeNote,
   rescale, toPlayable, generateSectionMelody, shiftMelodies,
@@ -263,6 +264,9 @@ function renderBar(section, bar, index) {
  * そのコードの構成音の行に色を敷いてあるので、光っている行を叩けば必ずハマる。
  */
 function renderMelodyGrid(section, bar) {
+  const wrap = el('div', 'mel-row');
+  wrap.style.setProperty('--rows', MELODY_ROWS);
+
   const grid = el('div', 'mel-grid');
   grid.style.setProperty('--steps', section.steps);
   grid.style.setProperty('--rows', MELODY_ROWS);
@@ -270,6 +274,21 @@ function renderMelodyGrid(section, bar) {
 
   const stepsPerBeat = Math.max(1, Math.round(section.steps / project.beatsPerBar));
   const { tones, root } = chordToneRows(project, bar.chord);
+
+  // 左端に音名を出す。どの行がコードの構成音なのかが名前で確かめられる
+  const labels = el('div', 'mel-labels');
+  for (let row = MELODY_ROWS - 1; row >= 0; row--) {
+    const name = scaleIndexName(project.key, project.mode, row);
+    const lab = el('div', 'mel-label', name);
+    if (tones.has(row)) lab.classList.add('tone');
+    if (row === root) lab.classList.add('root');
+    lab.title = row === root
+      ? `${name} … ${bar.chord} のルート`
+      : tones.has(row)
+        ? `${name} … ${bar.chord} の構成音`
+        : `${name} … コード外の音`;
+    labels.append(lab);
+  }
 
   for (let row = MELODY_ROWS - 1; row >= 0; row--) {
     for (let step = 0; step < section.steps; step++) {
@@ -283,8 +302,9 @@ function renderMelodyGrid(section, bar) {
       grid.append(cell);
     }
   }
+  wrap.append(labels, grid);
   paintNotes(grid, section, bar);
-  return grid;
+  return wrap;
 }
 
 /** 音符の有無だけをセルのクラスに反映する（作り直さないので軽い） */
@@ -301,7 +321,7 @@ function paintNotes(grid, section, bar) {
       if (i === 0) cell.classList.add('head');
     }
   }
-  const badge = grid.parentElement?.querySelector('.note-count');
+  const badge = grid.closest('.mel-wrap')?.querySelector('.note-count');
   if (badge) fillNoteCount(badge, section, bar);
 }
 
@@ -464,6 +484,15 @@ function renderSection(section, sectionIndex) {
   section.bars.forEach((bar, i) => bars.append(renderBar(section, bar, i)));
 
   node.append(head, bars, renderPalette(section));
+  if (section.showMelody) {
+    const legend = el('div', 'mel-legend');
+    legend.append(
+      el('span', 'swatch root'), el('span', null, 'ルート'),
+      el('span', 'swatch tone'), el('span', null, 'コードの構成音（ここに置けば外れません）'),
+      el('span', 'swatch'), el('span', null, 'コード外の音'),
+    );
+    node.insertBefore(legend, bars);
+  }
   node.dataset.sectionIndex = String(sectionIndex);
   return node;
 }
@@ -821,8 +850,8 @@ $('#sections').addEventListener('input', (ev) => {
       bar.chord = target.value;
       target.classList.toggle('invalid', !!bar.chord && !parseChord(bar.chord));
       // コードが変わるとグリッドで光る行（構成音）も変わる
-      const grid = barNode.querySelector('[data-mel-grid]');
-      if (grid) grid.replaceWith(renderMelodyGrid(section, bar));
+      const melRow = barNode.querySelector('.mel-row');
+      if (melRow) melRow.replaceWith(renderMelodyGrid(section, bar));
       persist();
       break;
     }
@@ -1019,13 +1048,52 @@ for (const role of ROLES) {
 }
 
 /* --- フッター --- */
-$('#btnExport').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
+const safeName = () => (project.title || 'song').replace(/[\\/:*?"<>|]/g, '_');
+
+function download(data, extension, mime) {
+  const url = URL.createObjectURL(new Blob([data], { type: mime }));
   const a = el('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${(project.title || 'song').replace(/[\\/:*?"<>|]/g, '_')}.json`;
+  a.href = url;
+  a.download = `${safeName()}.${extension}`;
+  // DOM に入れてからクリックしないと、ブラウザがファイル名を無視することがある
+  document.body.append(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  // すぐ解放するとダウンロードが始まる前に切れることがあるので、少し待つ
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+$('#btnExport').addEventListener('click', () => {
+  download(JSON.stringify(project, null, 2), 'json', 'application/json');
+});
+
+$('#btnMidi').addEventListener('click', () => {
+  const hasMelody = project.sections.some((s) => s.bars.some((b) => b.melody.length));
+  download(toMidi(project), 'mid', 'audio/midi');
+  toast(hasMelody
+    ? 'MIDIを書き出しました（メロディ／コードの2トラック）'
+    : 'MIDIを書き出しました（メロディが空なのでコードのみ）');
+});
+
+$('#btnMusicXml').addEventListener('click', () => {
+  const res = toMusicXML(project);
+  if (!res.notes) { toast('メロディが1つも置かれていません', true); return; }
+  download(res.xml, 'musicxml', 'application/vnd.recordare.musicxml+xml');
+
+  // 歌詞が全部乗らなかった場合は、その理由をはっきり伝える
+  const notes = [`${res.notes}音中${res.withLyric}音に歌詞`];
+  if (res.unknownReading) notes.push(`読み不明${res.unknownReading}小節`);
+  if (res.mismatched) notes.push(`音数とモーラ数が違う小節${res.mismatched}`);
+  toast(`MusicXMLを書き出しました（${notes.join(' / ')}）`);
+});
+
+$('#btnKana').addEventListener('click', () => {
+  const res = kanaLyrics(project);
+  if (!res.text.trim()) { toast('歌詞がありません', true); return; }
+  copyText(res.text, 'かな歌詞');
+  if (res.unknown) {
+    toast(`${res.unknown}小節は漢字の読みが不明です。AIで書き直すか、かなで入力してください`, true);
+  }
 });
 
 $('#btnImport').addEventListener('click', () => $('#importFile').click());
