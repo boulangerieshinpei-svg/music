@@ -7,9 +7,13 @@ import {
 import { countMora, hasKanji } from './mora.js';
 import {
   ROLES, defaultProject, normalizeProject, makeSection, makeBar, transposeProject,
-  saveLocal, loadLocal, saveSettings, loadSettings, totalBars, estimateSeconds, lyricsToText,
+  saveSettings, loadSettings, totalBars, estimateSeconds, lyricsToText,
   PATTERN_IDS,
 } from './state.js';
+import {
+  loadIndex, saveSong, loadSong, deleteSong, duplicateSong,
+  currentId, setCurrentId, migrateLegacy, resolveOpening, newSongId, StorageFullError,
+} from './library.js';
 import { MOODS, generateLyrics, generateProgression } from './generator.js';
 import { toMidi, toMusicXML, kanaLyrics } from './export.js';
 import {
@@ -29,7 +33,16 @@ const el = (tag, className, text) => {
   return n;
 };
 
-let project = loadLocal() || defaultProject();
+migrateLegacy();
+let opening = resolveOpening();
+if (!opening) {
+  // まだ1曲も無ければ、新しい曲を1つ用意する
+  opening = { id: newSongId(), project: defaultProject() };
+  saveSong(opening.id, opening.project);
+  setCurrentId(opening.id);
+}
+let songId = opening.id;
+let project = opening.project;
 let settings = Object.assign(
   {
     apiKey: '', model: MODELS[0].id, effort: 'medium',
@@ -45,7 +58,6 @@ if (settings.pattern) {
   if (PATTERN_IDS.includes(settings.pattern)) project.pattern = settings.pattern;
   delete settings.pattern;
   saveSettings(settings);
-  saveLocal(project);
 }
 
 const selection = new Set();     // "sectionId#barIndex"
@@ -93,9 +105,22 @@ function persist(tag = '') {
   lastPushAt = now;
   lastPushTag = tag;
   baseline = JSON.stringify(project);
-  saveLocal(project);
+  storeCurrent();
   updateStats();
   syncUndoButtons();
+}
+
+/** いま開いている曲を保存庫へ書き戻す */
+function storeCurrent() {
+  try {
+    saveSong(songId, project);
+  } catch (e) {
+    if (e instanceof StorageFullError) {
+      toast('保存領域がいっぱいです。使わない曲を消すか、JSONで書き出してください', true);
+    } else {
+      toast('保存できませんでした', true);
+    }
+  }
 }
 
 function syncUndoButtons() {
@@ -109,7 +134,7 @@ function restoreSnapshot(json, pushTo) {
   project = JSON.parse(json);
   baseline = json;
   lastPushTag = '';
-  saveLocal(project);
+  storeCurrent();
   selection.clear();   // 元に戻すと小節の並びが変わり得るので選択は解除する
   render();
   syncTopbar();
@@ -1309,10 +1334,9 @@ $('#importFile').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   try {
-    project = normalizeProject(JSON.parse(await file.text()));
-    selection.clear();
-    persist(); render(); syncTopbar();
-    toast('読み込みました');
+    // 開いている曲を潰さないよう、別の曲として取り込む
+    createSong(normalizeProject(JSON.parse(await file.text())));
+    toast('別の曲として読み込みました');
   } catch {
     toast('JSONを読み込めませんでした', true);
   }
@@ -1369,10 +1393,123 @@ $('#btnIdeas').addEventListener('click', () => {
 });
 
 $('#btnReset').addEventListener('click', () => {
-  if (!confirm('現在の内容を破棄して新規作成します。よろしいですか？')) return;
-  project = defaultProject();
+  // 前は今の曲を捨てていたが、保存庫に残るようになったので確認は要らない
+  createSong();
+});
+
+/* --- 曲の一覧 --- */
+
+/** 別の曲に切り替える。いま開いている曲は保存済みなので、そのまま差し替える */
+function openSong(id) {
+  const next = loadSong(id);
+  if (!next) { toast('その曲を読み込めませんでした', true); return; }
+  player.stop();
+  songId = id;
+  project = next;
+  setCurrentId(id);
+  // 曲が変われば履歴も別物になる
+  undoStack.length = 0;
+  redoStack.length = 0;
+  baseline = JSON.stringify(project);
+  lastPushTag = '';
   selection.clear();
-  persist(); render(); syncTopbar();
+  openTools.clear();
+  openPalettes.clear();
+  render();
+  syncTopbar();
+  syncUndoButtons();
+  toast(`「${project.title}」を開きました`);
+}
+
+/** 新しい曲を作る。いまの曲は保存庫に残る */
+function createSong(base = null) {
+  storeCurrent();
+  const id = newSongId();
+  const fresh = base || defaultProject();
+  try {
+    saveSong(id, fresh);
+  } catch {
+    toast('保存領域がいっぱいで、新しい曲を作れませんでした', true);
+    return;
+  }
+  openSong(id);
+}
+
+function fmtDate(ms) {
+  const d = new Date(ms);
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
+function renderLibrary() {
+  const list = $('#libraryList');
+  list.innerHTML = '';
+  const entries = loadIndex();
+
+  if (!entries.length) {
+    list.append(el('div', 'lib-empty', 'まだ保存された曲がありません'));
+  }
+  for (const e of entries) {
+    const row = el('div', 'lib-item');
+    if (e.id === songId) row.classList.add('current');
+
+    const open = el('button', 'lib-open');
+    open.type = 'button';
+    open.append(
+      el('div', 'lib-title', e.title || '無題'),
+      el('div', 'lib-meta',
+        `${e.key}${e.mode === 'minor' ? 'm' : ''} / ${e.bpm}BPM / ${e.bars}小節 / 歌詞${e.lyricBars}小節 · ${fmtDate(e.updatedAt)}`),
+    );
+    open.addEventListener('click', () => {
+      if (e.id !== songId) openSong(e.id);
+      $('#libraryDlg').close();
+    });
+    row.append(open);
+
+    if (e.id === songId) row.append(el('span', 'lib-badge', '編集中'));
+
+    const dup = el('button', 'mini', '複製');
+    dup.type = 'button';
+    dup.title = '書きかけを残したまま別案を試す';
+    dup.addEventListener('click', () => {
+      if (e.id === songId) storeCurrent();
+      const made = duplicateSong(e.id);
+      if (!made) { toast('複製できませんでした', true); return; }
+      renderLibrary();
+      toast(`「${made.project.title}」を作りました`);
+    });
+
+    const del = el('button', 'mini', '削除');
+    del.type = 'button';
+    del.addEventListener('click', () => {
+      if (!confirm(`「${e.title}」を削除します。元に戻せません。よろしいですか？`)) return;
+      const wasCurrent = e.id === songId;
+      deleteSong(e.id);
+      if (wasCurrent) {
+        // 編集中の曲を消したら、残っている曲か新しい曲へ移る
+        const next = loadIndex()[0];
+        if (next) openSong(next.id); else createSong();
+      }
+      renderLibrary();
+      toast('削除しました');
+    });
+
+    row.append(dup, del);
+    list.append(row);
+  }
+
+  $('#libStats').textContent = entries.length ? `${entries.length}曲` : '';
+}
+
+$('#btnLibrary').addEventListener('click', () => {
+  storeCurrent();
+  renderLibrary();
+  $('#libraryDlg').showModal();
+});
+
+$('#btnNewSong').addEventListener('click', () => {
+  createSong();
+  $('#libraryDlg').close();
 });
 
 /* --- 設定ダイアログ --- */

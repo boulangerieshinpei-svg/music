@@ -46,6 +46,7 @@
   </div>
 
   <div class="topbar-right">
+    <button id="btnLibrary" class="btn ghost" title="保存した曲の一覧">☰ 曲</button>
     <button id="btnPanel" class="btn ghost" title="キー・BPM・音量などの設定を開く">曲設定</button>
     <button id="btnUndo" class="btn ghost" title="元に戻す（Ctrl+Z）" disabled>↶</button>
     <button id="btnRedo" class="btn ghost" title="やり直す（Ctrl+Shift+Z）" disabled>↷</button>
@@ -104,7 +105,7 @@
   <button id="btnKana" class="btn ghost" title="1音符1モーラのかな歌詞をコピー（SynthVへの貼り付け用）">かな歌詞をコピー</button>
   <button id="btnIdeas" class="btn ghost">✨ タイトル案</button>
   <span class="spacer"></span>
-  <button id="btnReset" class="btn danger-ghost">新規作成</button>
+  <button id="btnReset" class="btn ghost">＋ 新しい曲</button>
   <input id="importFile" type="file" accept="application/json,.json" hidden>
 </footer>
 
@@ -148,6 +149,25 @@
 
     <menu class="dlg-actions">
       <button class="btn primary" value="close">閉じる</button>
+    </menu>
+  </form>
+</dialog>
+
+<!-- 曲の一覧 -->
+<dialog id="libraryDlg" class="dlg">
+  <h2>曲の一覧</h2>
+  <p class="hint">
+    このブラウザに保存されています。端末やブラウザをまたいでは共有されないので、
+    残しておきたい曲は「JSON書き出し」でファイルにしておいてください。
+  </p>
+  <div id="libraryList" class="lib-list"></div>
+  <div class="row lib-actions">
+    <button id="btnNewSong" class="btn primary" type="button">＋ 新しい曲</button>
+    <span id="libStats" class="ai-status"></span>
+  </div>
+  <form method="dialog">
+    <menu class="dlg-actions">
+      <button class="btn" value="close">閉じる</button>
     </menu>
   </form>
 </dialog>
