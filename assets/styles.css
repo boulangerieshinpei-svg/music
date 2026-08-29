@@ -211,6 +211,13 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .ai-input:focus { outline: none; border-color: var(--accent); }
 .ai-status { font-size: 12px; color: var(--muted); min-width: 0; }
 .ai-status:empty { display: none; }
+/* エラーは見落とすと原因が分からないので、色だけでなく地の色でも目立たせる */
+.ai-status.err {
+  background: rgba(232, 117, 106, .14);
+  border: 1px solid var(--bad);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
 .ai-status.err { color: var(--bad); }
 .ai-status.ok { color: var(--ok); }
 .ai-status.busy { color: var(--accent); }
@@ -372,8 +379,12 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
     flex-wrap: wrap; gap: 6px;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   }
+  /* 状態は画面のいちばん下に置くと見落とすので、指示欄より上に出す */
+  .ai-status { flex: 1 1 100%; order: 0; }
   .ai-input { flex: 1 1 100%; order: 2; padding: 9px 10px; }
-  .ai-status { flex: 1 1 100%; order: 3; }
+
+  /* トーストがAI指示バーの裏に隠れていたので、その上へ逃がす */
+  .toast { bottom: calc(120px + env(safe-area-inset-bottom)); }
 
   .footer { padding: 10px; }
   .footer .btn { flex: 1 1 40%; }
