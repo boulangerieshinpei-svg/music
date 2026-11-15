@@ -4,196 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1117">
-<title>ボカロ作曲スケッチ</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c9cff'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%230f1117'%3E%E2%99%AA%3C/text%3E%3C/svg%3E">
+<title>音楽理論ドリル</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234ec9a5'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%230f1117'%3E%E2%99%AA%3C/text%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="assets/icon.svg">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/study.css">
 </head>
 <body>
 
-<header class="topbar">
-  <div class="brand">
-    <span class="logo">♪</span>
-    <input id="songTitle" class="title-input" type="text" placeholder="曲名" aria-label="曲名">
-  </div>
-
-  <div class="topbar-controls">
-    <label class="ctl">キー
-      <select id="keySel" aria-label="キー"></select>
-    </label>
-    <label class="ctl">
-      <select id="modeSel" aria-label="モード"></select>
-    </label>
-    <div class="ctl transpose">
-      <button id="transDown" class="mini" title="半音下げる">▼</button>
-      <span class="ctl-label">移調</span>
-      <button id="transUp" class="mini" title="半音上げる">▲</button>
-    </div>
-    <label class="ctl">BPM
-      <input id="bpmInput" type="number" min="40" max="300" step="1" aria-label="BPM">
-    </label>
-    <label class="ctl">拍子
-      <select id="beatsSel" aria-label="拍子">
-        <option value="4">4/4</option>
-        <option value="3">3/4</option>
-        <option value="6">6/4</option>
-        <option value="2">2/4</option>
-      </select>
-    </label>
-  </div>
-
-  <div class="topbar-right">
-    <a href="study.html" class="btn ghost" style="text-decoration:none;color:inherit" title="音楽理論ドリル（耳と鍵盤で理論を練習）">📖 理論</a>
-    <button id="btnLibrary" class="btn ghost" title="保存した曲の一覧">☰ 曲</button>
-    <button id="btnPanel" class="btn ghost" title="キー・BPM・音量などの設定を開く">曲設定</button>
-    <button id="btnUndo" class="btn ghost" title="元に戻す（Ctrl+Z）" disabled>↶</button>
-    <button id="btnRedo" class="btn ghost" title="やり直す（Ctrl+Shift+Z）" disabled>↷</button>
-    <button id="playAll" class="btn primary">▶ 全体再生</button>
-    <button id="stopAll" class="btn" disabled>■ 停止</button>
-    <button id="openSettings" class="btn ghost" title="AI・再生の設定">⚙</button>
-  </div>
+<header class="s-top">
+  <button id="btnHome" class="s-back" hidden aria-label="メニューへ戻る">‹ メニュー</button>
+  <span class="s-logo">♪</span>
+  <h1 id="topTitle">音楽理論ドリル</h1>
+  <a class="s-link" href="sketch.html" title="ボカロ作曲スケッチへ">作曲へ ›</a>
 </header>
 
-<div class="subbar">
-  <label class="ctl">雰囲気
-    <select id="moodSel" aria-label="雰囲気"></select>
-  </label>
-  <label class="ctl grow">テーマ
-    <input id="themeInput" type="text" placeholder="例: 終電で帰れなかった夜のこと" aria-label="テーマ">
-  </label>
-  <label class="ctl">音色
-    <select id="patternSel" aria-label="再生パターン"></select>
-  </label>
-  <label class="ctl">
-    <input id="clickChk" type="checkbox" checked> クリック
-  </label>
-  <label class="ctl">
-    <input id="chordsChk" type="checkbox" checked> コード
-  </label>
-  <label class="ctl">
-    <input id="melodyChk" type="checkbox" checked> メロディ
-  </label>
-  <label class="ctl">
-    <input id="loopChk" type="checkbox"> ループ
-  </label>
-  <label class="ctl" title="鍵盤や余白を省いて、一度に見える小節を増やす">
-    <input id="compactChk" type="checkbox"> コンパクト
-  </label>
-  <label class="ctl">音量
-    <input id="volInput" type="range" min="0" max="1" step="0.05" value="0.7" aria-label="音量">
-  </label>
-  <span class="spacer"></span>
-  <span id="songStats" class="stats"></span>
-</div>
+<main id="view" class="s-main"></main>
 
-<main id="sections" class="sections"></main>
-
-<div class="add-section-row">
-  <span>セクションを追加:</span>
-  <span id="addSectionBtns" class="chips"></span>
-</div>
-
-<footer class="footer">
-  <button id="btnExport" class="btn ghost">JSON書き出し</button>
-  <button id="btnImport" class="btn ghost">JSON読み込み</button>
-  <button id="btnCopyLyrics" class="btn ghost">歌詞をコピー</button>
-  <button id="btnCopySheet" class="btn ghost">コード譜をコピー</button>
-  <button id="btnMidi" class="btn ghost" title="メロディとコードをMIDIで書き出す（Studio One などのDAW向け）">MIDI書き出し</button>
-  <button id="btnMusicXml" class="btn ghost" title="メロディとかな歌詞をMusicXMLで書き出す（Synthesizer V 向け）">MusicXML書き出し</button>
-  <button id="btnKana" class="btn ghost" title="1音符1モーラのかな歌詞をコピー（SynthVへの貼り付け用）">かな歌詞をコピー</button>
-  <button id="btnIdeas" class="btn ghost">✨ タイトル案</button>
-  <span class="spacer"></span>
-  <button id="btnReset" class="btn ghost">＋ 新しい曲</button>
-  <input id="importFile" type="file" accept="application/json,.json" hidden>
-</footer>
-
-<!-- AI指示バー -->
-<div class="ai-bar">
-  <span class="ai-badge">AI</span>
-  <input id="aiInstruction" type="text" class="ai-input"
-         placeholder="指示（例: もっと切なく / 韻を踏んで / 比喩をやめて具体的に / 英語混ぜないで）">
-  <label class="ctl"><input id="keepMoraChk" type="checkbox" checked> モーラ数を保つ</label>
-  <span id="aiStatus" class="ai-status"></span>
-</div>
-
-<!-- 設定モーダル -->
-<dialog id="settingsDlg" class="dlg">
-  <form method="dialog">
-    <h2>設定</h2>
-
-    <section class="dlg-sec">
-      <h3>Claude API</h3>
-      <p class="hint">
-        AIでの歌詞・コード生成に使います。キーはこのブラウザの localStorage に保存され、
-        リクエストはブラウザから直接 Anthropic API に送られます。
-        <strong>自分のPCで自分のキーを使う前提</strong>のツールです。共有PCや公開サーバーには置かないでください。
-        キーが無くても、オフラインの「たたき生成」は使えます。
-      </p>
-      <label class="field">APIキー
-        <input id="apiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off">
-      </label>
-      <label class="field">ワークスペースID（必要な場合のみ）
-        <input id="workspaceInput" type="text" placeholder="wrkspc_..." autocomplete="off" spellcheck="false">
-      </label>
-      <p class="hint">
-        「anthropic-workspace-id is required」というエラーが出たときだけ入れてください。
-        コンソールの Settings → Workspaces で、対象のワークスペースを開くと
-        <code>wrkspc_</code> から始まるIDが確認できます。
-      </p>
-      <label class="field">モデル
-        <select id="modelSel"></select>
-      </label>
-      <label class="field">思考の深さ
-        <select id="effortSel"></select>
-      </label>
-      <div class="row">
-        <button id="btnTestKey" class="btn" type="button">接続テスト</button>
-        <button id="btnClearKey" class="btn ghost" type="button">キーを削除</button>
-        <span id="keyStatus" class="ai-status"></span>
-      </div>
-    </section>
-
-    <menu class="dlg-actions">
-      <button class="btn primary" value="close">閉じる</button>
-    </menu>
-  </form>
-</dialog>
-
-<!-- 曲の一覧 -->
-<dialog id="libraryDlg" class="dlg">
-  <h2>曲の一覧</h2>
-  <p class="hint">
-    このブラウザに保存されています。端末やブラウザをまたいでは共有されないので、
-    残しておきたい曲は「JSON書き出し」でファイルにしておいてください。
-  </p>
-  <div id="libraryList" class="lib-list"></div>
-  <div class="row lib-actions">
-    <button id="btnNewSong" class="btn primary" type="button">＋ 新しい曲</button>
-    <span id="libStats" class="ai-status"></span>
-  </div>
-  <form method="dialog">
-    <menu class="dlg-actions">
-      <button class="btn" value="close">閉じる</button>
-    </menu>
-  </form>
-</dialog>
-
-<!-- アイデアモーダル -->
-<dialog id="ideasDlg" class="dlg">
-  <form method="dialog">
-    <h2>タイトル・世界観の案</h2>
-    <div id="ideasBody" class="ideas-body"></div>
-    <menu class="dlg-actions">
-      <button class="btn primary" value="close">閉じる</button>
-    </menu>
-  </form>
-</dialog>
-
-<div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-<script type="module" src="src/app.js"></script>
+<script type="module" src="src/study.js"></script>
 </body>
 </html>

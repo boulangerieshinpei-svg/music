@@ -1,7 +1,7 @@
 {
-  "name": "ボカロ作曲スケッチ",
-  "short_name": "作曲スケッチ",
-  "description": "小節ごとに作詞・コード・メロディのたたき台を作るツール",
+  "name": "音楽理論ドリル",
+  "short_name": "理論ドリル",
+  "description": "耳と鍵盤で音楽理論を反復練習するドリル",
   "start_url": "./index.html",
   "display": "standalone",
   "orientation": "any",
